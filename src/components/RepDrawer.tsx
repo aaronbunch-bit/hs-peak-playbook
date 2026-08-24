@@ -117,22 +117,27 @@ export function RepDrawer({
   onToggleFocus,
   onNoteChange,
 }: Props) {
-  const newestClosed = row?.weeks[0]?.week ?? focusWeek
   const rowKey = row?.name ?? ''
-  const [noteWeek, setNoteWeek] = useState(newestClosed)
+  const [noteWeek, setNoteWeek] = useState(focusWeek)
 
   useEffect(() => {
     if (!rowKey) return
-    setNoteWeek(newestClosed)
-  }, [rowKey, newestClosed])
+    setNoteWeek(focusWeek)
+  }, [rowKey, focusWeek])
 
   if (!row) return null
 
   const chrono = [...row.weeks].reverse()
   const newestFirst = row.weeks
   const focused = focusedSlices.includes(slice)
+  const noteIsCurrent = noteWeek === focusWeek
   const selectedNote = notesByWeek[noteWeek] ?? ''
-  const selectedPoint = newestFirst.find((w) => w.week === noteWeek)
+  const thisWeekPoint: WeekPoint = {
+    week: focusWeek,
+    pgc: row.wtdPgc,
+    cc90: row.wtdCc90,
+    deltaWow: row.wtdVsLast,
+  }
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
@@ -227,26 +232,53 @@ export function RepDrawer({
           </div>
 
           <div className="mt-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
-            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
-              Notes · week of {formatWeek(noteWeek)}
-            </p>
-            <p className="mt-1 text-[11px] text-slate-400">
-              Click a week below to open that week’s note. Saved on that week.
-            </p>
-            <textarea
-              value={selectedNote}
-              onChange={(e) => onNoteChange(noteWeek, e.target.value)}
-              rows={4}
-              placeholder={
-                selectedPoint
-                  ? `Actions for week of ${formatWeek(noteWeek)}…`
-                  : `Notes for week of ${formatWeek(noteWeek)}…`
-              }
-              className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-fuchsia-200 placeholder:text-slate-400 focus:ring-2"
-            />
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                  {noteIsCurrent ? 'Notes · this week' : `Notes · week of ${formatWeek(noteWeek)}`}
+                </p>
+                <p className="mt-1 text-[11px] text-slate-400">
+                  {noteIsCurrent
+                    ? 'Only this week can be edited. Click a closed week to read its note.'
+                    : 'Closed week — view only.'}
+                </p>
+              </div>
+              {!noteIsCurrent && (
+                <button
+                  type="button"
+                  onClick={() => setNoteWeek(focusWeek)}
+                  className="shrink-0 rounded-full bg-sky-100 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-200"
+                >
+                  This week
+                </button>
+              )}
+            </div>
+            {noteIsCurrent ? (
+              <textarea
+                value={selectedNote}
+                onChange={(e) => onNoteChange(focusWeek, e.target.value)}
+                rows={4}
+                placeholder="Actions for this week…"
+                className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-fuchsia-200 placeholder:text-slate-400 focus:ring-2"
+              />
+            ) : (
+              <div className="mt-2 min-h-[6rem] whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-100/80 px-3 py-2 text-sm text-slate-700">
+                {selectedNote.trim() ? selectedNote : 'No note was saved for this week.'}
+              </div>
+            )}
           </div>
 
           <ul className="mt-3 space-y-2">
+            <WeekCard
+              point={thisWeekPoint}
+              selected={noteIsCurrent}
+              hasNote={Boolean(notesByWeek[focusWeek]?.trim())}
+              expectedPgc={row.expectedPgc}
+              slice={slice}
+              heading="This week"
+              subtitle="Sunday → today · editable"
+              onSelect={() => setNoteWeek(focusWeek)}
+            />
             {newestFirst.map((w) => (
               <WeekCard
                 key={w.week}
@@ -255,6 +287,7 @@ export function RepDrawer({
                 hasNote={Boolean(notesByWeek[w.week]?.trim())}
                 expectedPgc={row.expectedPgc}
                 slice={slice}
+                subtitle="View only"
                 onSelect={() => setNoteWeek(w.week)}
               />
             ))}
@@ -289,6 +322,8 @@ function WeekCard({
   hasNote,
   expectedPgc,
   slice,
+  heading,
+  subtitle,
   onSelect,
 }: {
   point: WeekPoint
@@ -296,6 +331,8 @@ function WeekCard({
   hasNote: boolean
   expectedPgc: number
   slice: Slice
+  heading?: string
+  subtitle?: string
   onSelect: () => void
 }) {
   return (
@@ -311,13 +348,14 @@ function WeekCard({
       >
         <div>
           <p className="flex items-center gap-1.5 text-sm font-medium text-slate-800">
-            Week of {formatWeek(point.week)}
+            {heading ?? `Week of ${formatWeek(point.week)}`}
             {hasNote && (
               <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold text-violet-700">
                 Note
               </span>
             )}
           </p>
+          {subtitle && <p className="text-[11px] text-slate-400">{subtitle}</p>}
           <p className="text-xs text-slate-400">
             cc90 {point.cc90 == null ? '—' : point.cc90.toLocaleString()}
             {point.mix != null

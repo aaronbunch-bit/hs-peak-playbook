@@ -22,30 +22,6 @@ export function weekOverWeek(
   return current - previous
 }
 
-function avgNums(xs: number[]): number {
-  return xs.reduce((a, b) => a + b, 0) / xs.length
-}
-
-/**
- * avg(newest 3 consecutive) − avg(next 3 consecutive) when six calendar weeks exist.
- * If a week is missing, falls back to this week vs the average of the prior 3 populated weeks.
- */
-export function delta3wk(newestFirst: Array<number | null | undefined>): number | null {
-  const first = newestFirst.slice(0, 3)
-  const second = newestFirst.slice(3, 6)
-  if (
-    first.length === 3 &&
-    second.length === 3 &&
-    first.every((v) => v != null) &&
-    second.every((v) => v != null)
-  ) {
-    return avgNums(first as number[]) - avgNums(second as number[])
-  }
-  const populated = newestFirst.filter((v): v is number => v != null)
-  if (populated.length < 4) return null
-  return populated[0] - avgNums(populated.slice(1, 4))
-}
-
 export function trendFromDelta(deltaWow: number | null): Trend | null {
   if (deltaWow == null) return null
   if (deltaWow >= IMPROVE_PTS) return 'up'
@@ -137,8 +113,6 @@ export function buildRows(
       const pgc = point?.pgc ?? null
       const cc90 = point?.cc90 ?? null
       const deltaWow = point?.deltaWow ?? null
-      const fromSelected = weeksSeries.slice(weekIndex)
-      const delta3 = delta3wk(fromSelected.map((w) => w.pgc))
       const wtd = isLatest ? wtdByRep.get(r.name) : undefined
       const wtdPgc = wtd?.pgc ?? null
       const expect = expectedPgc(targetPgc, r.level, curves)
@@ -151,7 +125,6 @@ export function buildRows(
         mix: point?.mix ?? null,
         expectedPgc: expect,
         deltaWow,
-        delta3wk: delta3,
         trend: trendFromDelta(deltaWow),
         atTarget: pgc != null && pgc >= expect,
         wtdPgc,

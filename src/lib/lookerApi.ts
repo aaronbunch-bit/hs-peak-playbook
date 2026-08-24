@@ -61,7 +61,7 @@ async function lookerFetch(token: string, path: string, init: RequestInit = {}):
   return fetch(`${apiBase()}${path}`, { ...init, headers })
 }
 
-/** Saved look is 4 complete weeks; Δ 3wk needs six, so closed weeks clone the query farther back. */
+/** Saved look is 4 complete weeks; clone farther back so the drawer sparkline has history. */
 const CLOSED_WEEKS_FILTER = '12 week ago for 12 week'
 
 async function runSavedLook(token: string): Promise<string> {

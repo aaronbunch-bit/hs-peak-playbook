@@ -3,7 +3,7 @@ import { SLICE_SHORT } from '../lib/slices'
 import type { RepRow, Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
-export type SortKey = 'name' | 'manager' | 'pgc' | 'wtdPgc' | 'deltaWow' | 'delta3wk'
+export type SortKey = 'name' | 'manager' | 'pgc' | 'wtdPgc' | 'deltaWow'
 
 type Props = {
   rows: RepRow[]
@@ -115,22 +115,13 @@ export function RepTable({
                   onClick={() => onSort('wtdPgc')}
                 />
               </th>
-              <th className="px-3 py-3 text-right font-medium">
+              <th className="px-4 py-3 text-right font-medium sm:px-5">
                 <SortBtn
                   label="Δ WoW"
                   active={sortKey === 'deltaWow'}
                   dir={sortDir}
                   align="right"
                   onClick={() => onSort('deltaWow')}
-                />
-              </th>
-              <th className="px-4 py-3 text-right font-medium sm:px-5">
-                <SortBtn
-                  label="Δ 3wk"
-                  active={sortKey === 'delta3wk'}
-                  dir={sortDir}
-                  align="right"
-                  onClick={() => onSort('delta3wk')}
                 />
               </th>
             </tr>
@@ -232,18 +223,15 @@ export function RepTable({
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums">
-                    <Delta value={row.deltaWow} />
-                  </td>
                   <td className="px-4 py-3 text-right tabular-nums sm:px-5">
-                    <Delta value={row.delta3wk} />
+                    <Delta value={row.deltaWow} />
                   </td>
                 </tr>
               )
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
+                <td colSpan={6} className="px-5 py-12 text-center text-slate-500">
                   No reps in this view.
                 </td>
               </tr>

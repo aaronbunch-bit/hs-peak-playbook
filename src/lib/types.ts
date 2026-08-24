@@ -116,7 +116,6 @@ export type RepRow = {
   mix: number | null
   expectedPgc: number
   deltaWow: number | null
-  delta3wk: number | null
   trend: Trend | null
   atTarget: boolean
   wtdPgc: number | null

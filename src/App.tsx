@@ -280,6 +280,7 @@ export default function App() {
   }
 
   const onNoteChange = (name: string, week: string, text: string) => {
+    if (week !== focusWeek) return
     const next = setNote(notes, week, name, text)
     setNotes(next)
     saveNotes(next)

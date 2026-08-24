@@ -204,13 +204,13 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
             <ol className="mt-2 list-decimal space-y-2 pl-4">
               <li>API key lives on Netlify (`LOOKER_CLIENT_ID` / secret), never in the browser.</li>
               <li>
-                Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so Δ 3wk can compare the
-                newest three vs the three before. Grain is Call Created At Week × Consultant, pivoted by Audience
+                Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so the rep drawer has
+                history for the sparkline. Grain is Call Created At Week × Consultant, pivoted by Audience
                 (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). There is no Overall slice.
               </li>
               <li>WTD is the same look, Call Created At Date = this Sunday → now (daily standups).</li>
               <li>Deltas display in basis points (100 bps = 1%).</li>
-              <li>Focus tags are per audience (HS, K12, Super) for that calendar week. Notes stamp to the week they are written.</li>
+              <li>Focus tags are per audience (HS, K12, Super) for that calendar week. Notes can only be written for the current week; prior weeks are view-only.</li>
               <li>When the calendar rolls to a new Sunday, last week’s focus stays in history and this week starts empty.</li>
             </ol>
           </section>
