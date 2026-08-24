@@ -1,0 +1,53 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --color-ink: #1b1f2a;
+  --color-muted: #6b7289;
+  --color-magenta: #e11d8a;
+  --color-sky: #38bdf8;
+  --color-violet: #a855f7;
+  --color-up: #059669;
+  --color-down: #e11d48;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(225, 29, 138, 0.12), transparent 55%),
+    radial-gradient(900px 480px at 100% 0%, rgba(56, 189, 248, 0.16), transparent 50%),
+    linear-gradient(180deg, #fbfaff 0%, #eef4ff 100%);
+}
+
+.title-gradient {
+  background: linear-gradient(90deg, #e11d8a 0%, #7c3aed 48%, #38bdf8 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.seg-btn {
+  @apply rounded-full px-3.5 py-1.5 text-sm font-medium transition;
+}
+
+.seg-btn[data-on='true'] {
+  background: #1b1f2a;
+  color: white;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.2);
+}
+
+.seg-btn[data-on='false'] {
+  color: #4b5568;
+}
+
+.seg-btn[data-on='false']:hover {
+  background: rgb(255 255 255 / 0.7);
+}
