@@ -23,10 +23,14 @@ type Props = {
   onHide: (name: string) => void
 }
 
-function Delta({ value }: { value: number | null }) {
+function Delta({ value, size = 'md' }: { value: number | null; size?: 'sm' | 'md' }) {
   if (value == null) return <span className="text-slate-400">—</span>
   const cls = value > 0 ? 'text-emerald-600' : value < 0 ? 'text-rose-600' : 'text-slate-500'
-  return <span className={`text-[15px] font-semibold tabular-nums ${cls}`}>{formatBps(value)}</span>
+  return (
+    <span className={`tabular-nums ${size === 'sm' ? 'text-[10px]' : 'text-sm font-medium'} ${cls}`}>
+      {formatBps(value)}
+    </span>
+  )
 }
 
 function SortBtn({
@@ -214,20 +218,19 @@ export function RepTable({
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums">
-                    <PgcStatus value={row.wtdPgc} atTarget={row.wtdAtTarget} expected={row.expectedPgc} />
-                    <div className="text-[10px] text-slate-400">
-                      {row.wtdPgc == null
-                        ? '—'
-                        : row.wtdCc90 == null
-                          ? 'cc90 —'
-                          : `${row.wtdCc90.toLocaleString()} cc90`}
-                    </div>
-                    {row.wtdVsLast != null && (
-                      <div className="text-[10px]">
-                        <Delta value={row.wtdVsLast} />
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex flex-col items-end gap-0.5">
+                      <PgcStatus value={row.wtdPgc} atTarget={row.wtdAtTarget} expected={row.expectedPgc} />
+                      <div className="text-[10px] text-slate-400">
+                        {row.wtdPgc == null
+                          ? '—'
+                          : row.wtdCc90 == null
+                            ? 'cc90 —'
+                            : `${row.wtdCc90.toLocaleString()} cc90`}
+                        {row.wtdVsLast != null ? ' · ' : ''}
+                        {row.wtdVsLast != null && <Delta value={row.wtdVsLast} size="sm" />}
                       </div>
-                    )}
+                    </div>
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     <Delta value={row.deltaWow} />
