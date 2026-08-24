@@ -9,7 +9,6 @@ type IdentityApi = {
   on: (event: string, cb: (user: SiteUser | null) => void) => void
   off: (event: string, cb: (user: SiteUser | null) => void) => void
   logout: () => Promise<void> | void
-  gotrue?: { loginExternalUrl: (provider: string) => string }
 }
 
 declare global {
@@ -19,6 +18,7 @@ declare global {
 }
 
 const DOMAIN_LIST = (import.meta.env.VITE_ALLOWED_EMAIL_DOMAINS as string | undefined) ?? 'varsitytutors.com'
+const IDENTITY_API = '/.netlify/identity'
 
 function allowedDomains(): string[] {
   return DOMAIN_LIST.split(',')
@@ -45,10 +45,20 @@ function setTokenGetter(user: SiteUser | null) {
   )
 }
 
+let identityInited = false
+
+async function identityAvailable(): Promise<boolean> {
+  try {
+    const res = await fetch(`${IDENTITY_API}/settings`)
+    return res.ok
+  } catch {
+    return false
+  }
+}
+
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const host = typeof window === 'undefined' ? '' : window.location.hostname
-  const requireAuth =
-    import.meta.env.PROD && host !== 'localhost' && host !== '127.0.0.1'
+  const requireAuth = import.meta.env.PROD && host !== 'localhost' && host !== '127.0.0.1'
   const [user, setUser] = useState<SiteUser | null>(null)
   const [ready, setReady] = useState(!requireAuth)
   const [wrongDomain, setWrongDomain] = useState(false)
@@ -59,54 +69,75 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       setReady(true)
       return
     }
+
+    let cancelled = false
     const identity = window.netlifyIdentity
-    if (!identity) {
-      setIdentityMissing(true)
-      setReady(true)
-      return
-    }
+
     const onUser = (next: SiteUser | null) => {
+      if (cancelled) return
       if (next?.email && !emailAllowed(next.email)) {
         setWrongDomain(true)
         setUser(null)
         setTokenGetter(null)
-        void identity.logout()
+        void identity?.logout()
         return
       }
       setWrongDomain(false)
       setUser(next)
       setTokenGetter(next)
     }
-    identity.init()
-    identity.on('init', (next) => {
+
+    const markReady = (next: SiteUser | null) => {
       onUser(next)
       setReady(true)
-    })
-    identity.on('login', (next) => {
+    }
+
+    const onInit = (next: SiteUser | null) => markReady(next)
+    const onLogin = (next: SiteUser | null) => {
       const hash = window.location.hash
       if (/access_token=|invite_token=|confirmation_token=/.test(hash)) {
         history.replaceState(null, '', `${window.location.pathname}${window.location.search}`)
       }
       onUser(next)
-      identity.close()
-    })
-    identity.on('logout', () => onUser(null))
+      identity?.close()
+    }
+    const onLogout = () => onUser(null)
+
+    void (async () => {
+      const enabled = await identityAvailable()
+      if (cancelled) return
+      if (!enabled || !identity) {
+        setIdentityMissing(true)
+        setReady(true)
+        return
+      }
+
+      identity.on('init', onInit)
+      identity.on('login', onLogin)
+      identity.on('logout', onLogout)
+
+      if (!identityInited) {
+        identityInited = true
+        identity.init({ APIUrl: `${window.location.origin}${IDENTITY_API}` })
+      } else {
+        markReady(identity.currentUser())
+      }
+
+      window.setTimeout(() => {
+        if (!cancelled) markReady(identity.currentUser())
+      }, 2500)
+    })()
+
     return () => {
-      identity.off('init', onUser)
-      identity.off('login', onUser)
-      identity.off('logout', onUser)
+      cancelled = true
+      identity?.off('init', onInit)
+      identity?.off('login', onLogin)
+      identity?.off('logout', onLogout)
     }
   }, [requireAuth])
 
   const signIn = () => {
-    const identity = window.netlifyIdentity
-    if (!identity) return
-    const googleUrl = identity.gotrue?.loginExternalUrl('google')
-    if (googleUrl) {
-      window.location.href = googleUrl
-      return
-    }
-    identity.open('login')
+    window.netlifyIdentity?.open('login')
   }
 
   if (!requireAuth) return children
@@ -120,8 +151,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <GateShell>
         <h1 className="text-2xl font-semibold text-slate-900">Google sign-in is not on yet</h1>
         <p className="mt-3 text-sm text-slate-600">
-          In Netlify: Site configuration → Identity → Enable Identity, then Registration → External providers → Google.
-          Invite-only is safest. This site only admits {allowedDomains().join(', ')} accounts.
+          In Netlify open this site → Project configuration → Identity → Enable Identity. Then Registration →
+          External providers → enable Google. Invite-only is safest. This site only admits{' '}
+          {allowedDomains().join(', ')} accounts.
         </p>
       </GateShell>
     )
