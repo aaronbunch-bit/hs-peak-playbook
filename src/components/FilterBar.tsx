@@ -48,7 +48,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Seg({ children }: { children: ReactNode }) {
-  return <div className="flex shrink-0 rounded-lg bg-slate-900/10 p-0.5">{children}</div>
+  return <div className="flex shrink-0 rounded-lg bg-slate-100 p-0.5">{children}</div>
 }
 
 export function FilterBar({
@@ -79,14 +79,14 @@ export function FilterBar({
   const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'Super'
 
   return (
-    <header className="sticky top-0 z-20 border-b border-violet-200/40 bg-[#1b1f2a]/[0.06] backdrop-blur-xl">
+    <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur-md">
       <div className="mx-auto max-w-6xl px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-4">
             <div>
               <p className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">Varsity Tutors</p>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                <span className="title-gradient">HS Peak</span> Playbook
+                HS Peak Playbook
               </h1>
             </div>
             <nav className="flex items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">

@@ -77,18 +77,18 @@ export function RepTable({
     <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl surface">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-slate-900/[0.06] text-left">
+          <thead className="bg-slate-50 text-left">
             <tr className="border-b border-slate-200/70">
               <th className="px-4 py-3 font-medium sm:px-5">
-                <SortBtn label="Rep" active={sortKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
-              </th>
-              <th className="px-3 py-3 font-medium">
-                <SortBtn
-                  label="Manager"
-                  active={sortKey === 'manager'}
-                  dir={sortDir}
-                  onClick={() => onSort('manager')}
-                />
+                <div className="flex items-center gap-3">
+                  <SortBtn label="Rep" active={sortKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
+                  <SortBtn
+                    label="Manager"
+                    active={sortKey === 'manager'}
+                    dir={sortDir}
+                    onClick={() => onSort('manager')}
+                  />
+                </div>
               </th>
               <th className="px-3 py-3 text-center font-medium">
                 <span className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Focus</span>
@@ -142,15 +142,15 @@ export function RepTable({
                 <tr
                   key={row.name}
                   onClick={() => onSelect(row.name)}
-                  className={`group cursor-pointer border-b border-slate-100/90 transition last:border-0 ${
-                    isSel ? 'bg-sky-200/40' : isFocus ? 'bg-fuchsia-200/35' : 'hover:bg-white/45'
+                  className={`group cursor-pointer border-b border-slate-100 transition last:border-0 ${
+                    isSel ? 'bg-sky-50' : isFocus ? 'bg-slate-50' : 'hover:bg-slate-50'
                   }`}
                 >
-                  <td className="relative px-4 py-3 sm:px-5">
+                  <td className="relative w-px whitespace-nowrap px-4 py-3 sm:px-5">
                     {isFocus && (
                       <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-gradient-to-b from-fuchsia-500 to-violet-500" />
                     )}
-                    <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex items-center gap-1.5">
                       <span className="font-medium text-slate-900">{row.name}</span>
                       {isSug && (
                         <span
@@ -167,17 +167,16 @@ export function RepTable({
                           e.stopPropagation()
                           onHide(row.name)
                         }}
-                        className="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-400 hover:bg-slate-200/80 hover:text-slate-700"
+                        className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-400 hover:bg-slate-200/80 hover:text-slate-700"
                       >
                         Hide
                       </button>
                     </div>
-                    <div className="text-xs text-slate-400">
-                      {row.level ?? 'Unknown'} · expect {formatPgc(row.expectedPgc)}
+                    <div className="text-xs text-slate-500">
+                      {row.manager ?? 'No manager'} · {row.level ?? 'Unknown'} · {formatPgc(row.expectedPgc)}
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-slate-600">{row.manager ?? '—'}</td>
-                  <td className="px-3 py-3 text-center">
+                  <td className="w-px whitespace-nowrap px-3 py-3 text-center">
                     <button
                       type="button"
                       aria-pressed={isFocus}
@@ -248,7 +247,7 @@ export function RepTable({
           </tbody>
         </table>
       </div>
-      <p className="border-t border-violet-200/40 px-5 py-2.5 text-xs text-slate-500">
+      <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         Green chips meet that rep’s LC expectation. LC4 is the slice bar ({formatPgc(targetPgc)}). Deltas are in
         bps (100 bps = 1%). Team pGC is CC90-weighted. WTD is this Sunday through today. Focus is for that
         calendar week and that audience (HS, K12, or Super). Hide removes a rep from this view until you restore

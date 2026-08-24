@@ -51,7 +51,7 @@ export function RosterPage({
       <div className="overflow-hidden rounded-2xl surface">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
-            <thead className="bg-slate-900/[0.06] text-left">
+            <thead className="bg-slate-50 text-left">
               <tr className="border-b border-slate-200/80">
                 <th className="px-4 py-3 text-[11px] font-semibold tracking-wide text-slate-500 uppercase sm:px-5">
                   Rep

@@ -98,8 +98,8 @@ export function RepDrawer({
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <button type="button" className="absolute inset-0 bg-slate-900/35" aria-label="Close" onClick={onClose} />
-      <aside className="relative flex h-full w-full max-w-md flex-col bg-gradient-to-b from-[#f4eefc] to-[#eaf3ff] shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-violet-200/50 px-5 py-4">
+      <aside className="relative flex h-full w-full max-w-md flex-col bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
             <p className="text-[11px] font-semibold tracking-[0.16em] text-slate-400 uppercase">Rep detail</p>
             <h2 className="text-xl font-semibold text-slate-900">{row.name}</h2>
@@ -110,7 +110,7 @@ export function RepDrawer({
           <button
             type="button"
             onClick={onClose}
-            className="rounded-full px-2.5 py-1 text-sm text-slate-500 hover:bg-white/50"
+            className="rounded-full px-2.5 py-1 text-sm text-slate-500 hover:bg-slate-100"
           >
             Close
           </button>
@@ -118,7 +118,7 @@ export function RepDrawer({
 
         <div className="flex-1 overflow-y-auto px-5 py-4">
           <div className="mb-4 grid grid-cols-2 gap-3">
-            <div className="rounded-2xl bg-white/45 p-3 ring-1 ring-violet-200/60">
+            <div className="rounded-2xl bg-slate-50 p-3">
               <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Last week</p>
               <div className="mt-1">
                 <PgcStatus value={row.pgc} atTarget={row.atTarget} expected={row.expectedPgc} size="lg" />
@@ -127,7 +127,7 @@ export function RepDrawer({
                 {row.level ?? 'Unknown'} expect {formatPgc(row.expectedPgc)}
               </p>
             </div>
-            <div className="rounded-2xl bg-sky-100/70 p-3 ring-1 ring-sky-200/80">
+            <div className="rounded-2xl bg-sky-50 p-3 ring-1 ring-sky-100">
               <p className="text-xs font-semibold tracking-wide text-sky-700 uppercase">WTD</p>
               <div className="mt-1">
                 <PgcStatus value={row.wtdPgc} atTarget={row.wtdAtTarget} expected={row.expectedPgc} size="lg" />
@@ -144,7 +144,7 @@ export function RepDrawer({
           </div>
 
           {suggestedReasons.length > 0 && (
-            <p className="mb-3 rounded-xl bg-amber-100/80 px-3 py-2 text-xs text-amber-900">
+            <p className="mb-3 rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-900">
               Suggested because {suggestedReasons.join(' · ')}
             </p>
           )}
@@ -166,7 +166,7 @@ export function RepDrawer({
                     className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                       on
                         ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white'
-                        : 'bg-white/50 text-slate-600 ring-1 ring-violet-200/70'
+                        : 'bg-slate-100 text-slate-600'
                     }`}
                   >
                     {on ? `${SLICE_SHORT[s]} focus` : `Mark ${SLICE_SHORT[s]}`}
@@ -176,14 +176,14 @@ export function RepDrawer({
             </div>
           </div>
 
-          <div className="rounded-2xl bg-white/40 p-3 ring-1 ring-violet-200/60">
+          <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
             <p className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Closed weeks · oldest → newest
             </p>
             <Sparkline values={chrono.map((w) => w.pgc)} target={row.expectedPgc} />
           </div>
 
-          <div className="mt-3 rounded-2xl bg-white/45 p-3 ring-1 ring-violet-200/60">
+          <div className="mt-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
             <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Notes · week of {formatWeek(noteWeek)}
             </p>
@@ -199,7 +199,7 @@ export function RepDrawer({
                   ? `Actions for week of ${formatWeek(noteWeek)}…`
                   : `Notes for week of ${formatWeek(noteWeek)}…`
               }
-              className="mt-2 w-full resize-y rounded-xl border border-violet-200/80 bg-white/70 px-3 py-2 text-sm text-slate-800 outline-none ring-fuchsia-200 placeholder:text-slate-400 focus:ring-2"
+              className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-fuchsia-200 placeholder:text-slate-400 focus:ring-2"
             />
           </div>
 
@@ -262,8 +262,8 @@ function WeekCard({
         onClick={onSelect}
         className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left ring-1 transition ${
           selected
-            ? 'bg-white/70 ring-violet-400'
-            : 'bg-white/30 ring-violet-200/50 hover:bg-white/50'
+            ? 'bg-sky-50 ring-sky-300'
+            : 'bg-white ring-slate-200 hover:bg-slate-50'
         }`}
       >
         <div>
