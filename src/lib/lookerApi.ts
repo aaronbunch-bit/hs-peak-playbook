@@ -61,9 +61,30 @@ async function lookerFetch(token: string, path: string, init: RequestInit = {}):
   return fetch(`${apiBase()}${path}`, { ...init, headers })
 }
 
+/** Saved look is 4 complete weeks; Δ 3wk needs six, so closed weeks clone the query farther back. */
+const CLOSED_WEEKS_FILTER = '12 week ago for 12 week'
+
 async function runSavedLook(token: string): Promise<string> {
   const res = await lookerFetch(token, `/looks/${lookId()}/run/csv?apply_vis=true`)
   if (!res.ok) throw new Error(`Looker run look failed (${res.status})`)
+  return res.text()
+}
+
+async function lookQuery(token: string): Promise<LookerQuery> {
+  const lookRes = await lookerFetch(token, `/looks/${lookId()}?fields=query`)
+  if (!lookRes.ok) throw new Error(`Looker look metadata failed (${lookRes.status})`)
+  const look = (await lookRes.json()) as { query?: LookerQuery }
+  if (!look.query) throw new Error('Looker look has no query')
+  return look.query
+}
+
+async function runQueryCsv(token: string, query: LookerQuery, timeFilter: string): Promise<string> {
+  const res = await lookerFetch(token, '/queries/run/csv', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(queryBody(query, timeFilter)),
+  })
+  if (!res.ok) throw new Error(`Looker query failed (${res.status})`)
   return res.text()
 }
 
@@ -83,20 +104,18 @@ function queryBody(query: LookerQuery, timeFilter: string): Record<string, unkno
   }
 }
 
-async function runWtd(token: string): Promise<string> {
-  const lookRes = await lookerFetch(token, `/looks/${lookId()}?fields=query`)
-  if (!lookRes.ok) throw new Error(`Looker look metadata failed (${lookRes.status})`)
-  const look = (await lookRes.json()) as { query?: LookerQuery }
-  if (!look.query) throw new Error('Looker look has no query')
+async function runClosedWeeks(token: string, query: LookerQuery): Promise<string> {
+  try {
+    return await runQueryCsv(token, query, CLOSED_WEEKS_FILTER)
+  } catch {
+    return runSavedLook(token)
+  }
+}
+
+async function runWtd(token: string, query: LookerQuery): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
-  const res = await lookerFetch(token, '/queries/run/csv', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(queryBody(look.query, `${sunday} to ${today}`)),
-  })
-  if (!res.ok) throw new Error(`Looker WTD query failed (${res.status})`)
-  return res.text()
+  return runQueryCsv(token, query, `${sunday} to ${today}`)
 }
 
 function rosterFromFacts(facts: LookerFact[]) {
@@ -162,7 +181,11 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
   }
 
   const token = await login()
-  const [closedCsv, wtdCsv] = await Promise.all([runSavedLook(token), runWtd(token).catch(() => '')])
+  const query = await lookQuery(token)
+  const [closedCsv, wtdCsv] = await Promise.all([
+    runClosedWeeks(token, query),
+    runWtd(token, query).catch(() => ''),
+  ])
   const facts = parseLookerPlaybook(closedCsv)
   const wtdFacts = wtdCsv ? parseLookerPlaybook(wtdCsv) : []
   const payload = payloadFromFacts(slice, facts, wtdFacts, `Looker look ${lookId()}`)

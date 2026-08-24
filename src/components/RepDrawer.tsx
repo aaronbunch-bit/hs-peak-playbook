@@ -1,17 +1,21 @@
-import { formatPts, formatPgc, formatWeek } from '../lib/pacer'
-import type { RepRow, Slice } from '../lib/types'
+import { formatBps, formatPgc, formatWeek } from '../lib/pacer'
+import { FOCUS_SLICES, SLICE_LABELS, SLICE_SHORT } from '../lib/slices'
+import type { FocusLogEntry, RepRow, Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
 type Props = {
   row: RepRow | null
-  focused: boolean
+  focusedSlices: Slice[]
   lastFocusWeek: string | null
   suggestedReasons: string[]
   focusWeek: string
   wtdAsOf: string | null
   slice: Slice
+  note: string
+  noteHistory: Array<{ week: string; text: string }>
   onClose: () => void
-  onToggleFocus: () => void
+  onToggleFocus: (slice: Slice) => void
+  onNoteChange: (text: string) => void
 }
 
 function Sparkline({
@@ -63,19 +67,24 @@ function Sparkline({
 
 export function RepDrawer({
   row,
-  focused,
+  focusedSlices,
   lastFocusWeek,
   suggestedReasons,
   focusWeek,
   wtdAsOf,
   slice,
+  note,
+  noteHistory,
   onClose,
   onToggleFocus,
+  onNoteChange,
 }: Props) {
   if (!row) return null
 
   const chrono = [...row.weeks].reverse()
   const newestFirst = row.weeks
+  const focused = focusedSlices.includes(slice)
+  const pastNotes = noteHistory.filter((n) => n.week !== focusWeek)
 
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
@@ -120,7 +129,7 @@ export function RepDrawer({
                   : `${row.wtdCc90 ?? '—'} cc90${wtdAsOf ? ` · as of ${formatWeek(wtdAsOf)}` : ''}`}
               </p>
               {row.wtdVsLast != null && (
-                <p className="text-xs text-slate-500">vs last week {formatPts(row.wtdVsLast)}</p>
+                <p className="text-xs text-slate-500">vs last week {formatBps(row.wtdVsLast)}</p>
               )}
             </div>
           </div>
@@ -131,22 +140,31 @@ export function RepDrawer({
             </p>
           )}
 
-          <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="mb-4">
             <p className="text-xs text-slate-500">
-              Focus for week of {formatWeek(focusWeek)} only. Next Sunday this tag clears.
-              {lastFocusWeek && !focused ? ` Last tagged ${formatWeek(lastFocusWeek)}.` : ''}
+              Focus is per audience for week of {formatWeek(focusWeek)}. Next Sunday these tags clear.
+              {lastFocusWeek && !focused ? ` Last ${SLICE_SHORT[slice]} tag ${formatWeek(lastFocusWeek)}.` : ''}
             </p>
-            <button
-              type="button"
-              onClick={onToggleFocus}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-sm font-semibold ${
-                focused
-                  ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white'
-                  : 'bg-slate-100 text-slate-600'
-              }`}
-            >
-              {focused ? 'Focus this week' : 'Mark this week'}
-            </button>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {FOCUS_SLICES.map((s) => {
+                const on = focusedSlices.includes(s)
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => onToggleFocus(s)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
+                      on
+                        ? 'bg-gradient-to-r from-fuchsia-500 to-violet-500 text-white'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
+                  >
+                    {on ? `${SLICE_SHORT[s]} focus` : `Mark ${SLICE_SHORT[s]}`}
+                  </button>
+                )
+              })}
+            </div>
           </div>
 
           <div className="rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">
@@ -197,10 +215,10 @@ export function RepDrawer({
                     {w.deltaWow == null
                       ? '—'
                       : w.deltaWow >= 0.03
-                        ? `▲ ${formatPts(w.deltaWow)}`
-                        : w.deltaWow <= -0.03
-                          ? `▼ ${formatPts(w.deltaWow)}`
-                          : formatPts(w.deltaWow)}
+                        ? `▲ ${formatBps(w.deltaWow)}`
+                          : w.deltaWow <= -0.03
+                            ? `▼ ${formatBps(w.deltaWow)}`
+                            : formatBps(w.deltaWow)}
                   </p>
                 </div>
               </li>
@@ -213,12 +231,39 @@ export function RepDrawer({
               <p className="mt-2 text-sm text-slate-400">No focus weeks logged for this rep.</p>
             ) : (
               <ul className="mt-2 space-y-1.5">
-                {row.focusHistory.map((f) => (
-                  <li key={`${f.week}-${f.rep}-${f.type}`} className="text-sm text-slate-600">
+                {row.focusHistory.map((f: FocusLogEntry) => (
+                  <li key={`${f.week}-${f.rep}-${f.slice ?? f.type}`} className="text-sm text-slate-600">
                     <span className="font-medium">{formatWeek(f.week)}</span>
+                    {f.slice ? ` · ${SLICE_LABELS[f.slice]}` : f.type ? ` · ${f.type}` : ''}
                     {f.week === focusWeek ? ' · this week' : ''}
-                    {f.type ? ` · ${f.type}` : ''}
                     {f.owner ? ` · ${f.owner}` : ''}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="mt-6">
+            <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Notes</p>
+            <p className="mt-1 text-xs text-slate-400">
+              Saved on week of {formatWeek(focusWeek)} — the week you write it, not the closed week you are
+              browsing.
+            </p>
+            <textarea
+              value={note}
+              onChange={(e) => onNoteChange(e.target.value)}
+              rows={4}
+              placeholder="Actions, coaching, next steps…"
+              className="mt-2 w-full resize-y rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 outline-none ring-fuchsia-200 placeholder:text-slate-400 focus:ring-2"
+            />
+            {pastNotes.length > 0 && (
+              <ul className="mt-3 space-y-2">
+                {pastNotes.map((n) => (
+                  <li key={n.week} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <p className="text-[11px] font-semibold tracking-wide text-slate-400 uppercase">
+                      Week of {formatWeek(n.week)}
+                    </p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{n.text}</p>
                   </li>
                 ))}
               </ul>

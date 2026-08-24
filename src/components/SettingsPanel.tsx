@@ -165,15 +165,15 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
                 <input
                   type="number"
                   min={0}
-                  max={50}
-                  step={0.5}
-                  value={Number((s.wowDeclinePts * 100).toFixed(1))}
+                  max={2000}
+                  step={25}
+                  value={Math.round(s.wowDeclinePts * 10000)}
                   onChange={(e) =>
-                    onChange({ ...settings, suggest: { ...s, wowDeclinePts: Number(e.target.value) / 100 } })
+                    onChange({ ...settings, suggest: { ...s, wowDeclinePts: Number(e.target.value) / 10000 } })
                   }
                   className="w-24 rounded-xl border border-slate-200 px-3 py-2 tabular-nums"
                 />
-                <span className="text-slate-400">pts</span>
+                <span className="text-slate-400">bps</span>
               </div>
             </label>
             <label className="mt-4 block text-sm">
@@ -204,11 +204,13 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
             <ol className="mt-2 list-decimal space-y-2 pl-4">
               <li>API key lives on Netlify (`LOOKER_CLIENT_ID` / secret), never in the browser.</li>
               <li>
-                Closed weeks use the HS Peak Playbook look: Call Created At Week × Consultant, pivoted by
-                Audience (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). There is
-                no Overall slice.
+                Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so Δ 3wk can compare the
+                newest three vs the three before. Grain is Call Created At Week × Consultant, pivoted by Audience
+                (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). There is no Overall slice.
               </li>
               <li>WTD is the same look, Call Created At Date = this Sunday → now (daily standups).</li>
+              <li>Deltas display in basis points (100 bps = 1%).</li>
+              <li>Focus tags are per audience (HS, K12, Super) for that calendar week. Notes stamp to the week they are written.</li>
               <li>When the calendar rolls to a new Sunday, last week’s focus stays in history and this week starts empty.</li>
             </ol>
           </section>

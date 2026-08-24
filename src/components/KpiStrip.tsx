@@ -1,4 +1,4 @@
-import { formatPgc, formatPts, type WeekKpis } from '../lib/pacer'
+import { formatBps, formatPgc, IMPROVE_PTS, type WeekKpis } from '../lib/pacer'
 
 type Props = {
   current: WeekKpis
@@ -9,6 +9,7 @@ type Props = {
   wtdReady: boolean
   suggestedCount: number
   selectedWeekLabel: string
+  onCompareWow: (value: boolean) => void
 }
 
 function DeltaHint({
@@ -23,7 +24,7 @@ function DeltaHint({
   if (current == null || prior == null) return null
   const delta = current - prior
   if (delta === 0) return <span className="text-slate-400">vs last wk · 0</span>
-  const label = kind === 'pgc' ? formatPts(delta) : `${delta > 0 ? '+' : ''}${delta}`
+  const label = kind === 'pgc' ? formatBps(delta) : `${delta > 0 ? '+' : ''}${delta}`
   const cls = delta > 0 ? 'text-emerald-600' : 'text-rose-600'
   return <span className={cls}>vs last wk {label}</span>
 }
@@ -37,6 +38,7 @@ export function KpiStrip({
   wtdReady,
   suggestedCount,
   selectedWeekLabel,
+  onCompareWow,
 }: Props) {
   const cards = [
     {
@@ -45,7 +47,7 @@ export function KpiStrip({
       hint: compareWow ? (
         <DeltaHint current={current.teamPgc} prior={prior?.teamPgc ?? null} kind="pgc" />
       ) : (
-        `CC90-weighted · LC4 bar ${formatPgc(targetPgc)} · ${selectedWeekLabel}`
+        `CC90-weighted · LC4 ${formatPgc(targetPgc)} · ${selectedWeekLabel}`
       ),
     },
     {
@@ -68,7 +70,7 @@ export function KpiStrip({
       hint: compareWow ? (
         <DeltaHint current={current.improving} prior={prior?.improving ?? null} kind="count" />
       ) : (
-        'Δ WoW ≥ +3.0 pts'
+        `Δ WoW ≥ ${formatBps(IMPROVE_PTS)}`
       ),
     },
     {
@@ -83,17 +85,27 @@ export function KpiStrip({
   ]
 
   return (
-    <section className="mx-auto grid max-w-6xl grid-cols-2 gap-3 px-4 sm:grid-cols-5 sm:px-6">
-      {cards.map((c) => (
-        <div
-          key={c.label}
-          className="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 shadow-sm shadow-slate-200/70"
+    <section className="mx-auto max-w-6xl px-4 sm:px-6">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="text-[11px] font-semibold tracking-[0.14em] text-slate-400 uppercase">This view</p>
+        <button
+          type="button"
+          className="rounded-md px-2 py-1 text-[11px] font-semibold text-slate-500 hover:bg-white/70 hover:text-slate-800"
+          data-on={compareWow}
+          onClick={() => onCompareWow(!compareWow)}
         >
-          <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{c.label}</p>
-          <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{c.value}</p>
-          <p className="text-xs text-slate-400">{c.hint}</p>
-        </div>
-      ))}
+          {compareWow ? 'Comparing WoW' : 'Compare WoW'}
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        {cards.map((c) => (
+          <div key={c.label} className="kpi-card px-4 py-3">
+            <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{c.label}</p>
+            <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{c.value}</p>
+            <p className="text-xs text-slate-400">{c.hint}</p>
+          </div>
+        ))}
+      </div>
     </section>
   )
 }

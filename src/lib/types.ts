@@ -58,6 +58,7 @@ export type WtdRow = {
 export type FocusLogEntry = {
   week: string
   rep: string
+  slice?: Slice | null
   type: string | null
   owner: string | null
   note: string | null

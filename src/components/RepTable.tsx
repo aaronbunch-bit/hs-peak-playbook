@@ -1,5 +1,6 @@
-import { formatPts, formatPgc, formatWeek } from '../lib/pacer'
-import type { RepRow, Slice, Trend } from '../lib/types'
+import { formatBps, formatPgc, formatWeek } from '../lib/pacer'
+import { SLICE_SHORT } from '../lib/slices'
+import type { RepRow, Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
 export type SortKey = 'name' | 'manager' | 'pgc' | 'wtdPgc' | 'deltaWow' | 'delta3wk'
@@ -10,6 +11,7 @@ type Props = {
   suggested: Set<string>
   suggestedReasons: Map<string, string[]>
   lastFocusWeek: Map<string, string | null>
+  focusSlices: Map<string, Slice[]>
   selected: string | null
   sortKey: SortKey
   sortDir: 'asc' | 'desc'
@@ -18,19 +20,13 @@ type Props = {
   onSort: (key: SortKey) => void
   onSelect: (name: string) => void
   onToggleFocus: (name: string) => void
-}
-
-function TrendMark({ trend }: { trend: Trend | null }) {
-  if (trend === 'up') return <span className="font-semibold text-emerald-600">▲</span>
-  if (trend === 'down') return <span className="font-semibold text-rose-600">▼</span>
-  if (trend === 'stagnant') return <span className="text-slate-400">—</span>
-  return <span className="text-slate-300">—</span>
+  onHide: (name: string) => void
 }
 
 function Delta({ value }: { value: number | null }) {
   if (value == null) return <span className="text-slate-400">—</span>
   const cls = value > 0 ? 'text-emerald-600' : value < 0 ? 'text-rose-600' : 'text-slate-500'
-  return <span className={cls}>{formatPts(value)}</span>
+  return <span className={cls}>{formatBps(value)}</span>
 }
 
 function SortBtn({
@@ -66,6 +62,7 @@ export function RepTable({
   suggested,
   suggestedReasons,
   lastFocusWeek,
+  focusSlices,
   selected,
   sortKey,
   sortDir,
@@ -74,13 +71,14 @@ export function RepTable({
   onSort,
   onSelect,
   onToggleFocus,
+  onHide,
 }: Props) {
   return (
-    <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-white/80 bg-white/85 shadow-sm shadow-slate-200/80">
+    <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-white/80 bg-white/90 shadow-sm shadow-violet-100/50">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-slate-50/90 text-left">
-            <tr className="border-b border-slate-200/80">
+          <thead className="bg-slate-50/80 text-left">
+            <tr className="border-b border-slate-200/70">
               <th className="px-4 py-3 font-medium sm:px-5">
                 <SortBtn label="Rep" active={sortKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
               </th>
@@ -122,7 +120,7 @@ export function RepTable({
                   onClick={() => onSort('deltaWow')}
                 />
               </th>
-              <th className="px-3 py-3 text-right font-medium">
+              <th className="px-4 py-3 text-right font-medium sm:px-5">
                 <SortBtn
                   label="Δ 3wk"
                   active={sortKey === 'delta3wk'}
@@ -130,9 +128,6 @@ export function RepTable({
                   align="right"
                   onClick={() => onSort('delta3wk')}
                 />
-              </th>
-              <th className="px-4 py-3 text-center font-medium sm:px-5">
-                <span className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Trend</span>
               </th>
             </tr>
           </thead>
@@ -142,12 +137,13 @@ export function RepTable({
               const isSug = suggested.has(row.name)
               const isSel = selected === row.name
               const prior = lastFocusWeek.get(row.name)
+              const also = (focusSlices.get(row.name) ?? []).filter((s) => s !== slice)
               return (
                 <tr
                   key={row.name}
                   onClick={() => onSelect(row.name)}
-                  className={`cursor-pointer border-b border-slate-100 transition last:border-0 ${
-                    isSel ? 'bg-sky-50/80' : isFocus ? 'bg-fuchsia-50/70' : 'hover:bg-slate-50/80'
+                  className={`group cursor-pointer border-b border-slate-100/90 transition last:border-0 ${
+                    isSel ? 'bg-sky-50/80' : isFocus ? 'bg-fuchsia-50/60' : 'hover:bg-slate-50/90'
                   }`}
                 >
                   <td className="relative px-4 py-3 sm:px-5">
@@ -164,6 +160,17 @@ export function RepTable({
                           Suggested
                         </span>
                       )}
+                      <button
+                        type="button"
+                        aria-label={`Hide ${row.name} from this view`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          onHide(row.name)
+                        }}
+                        className="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-slate-400 hover:bg-slate-200/80 hover:text-slate-700"
+                      >
+                        Hide
+                      </button>
                     </div>
                     <div className="text-xs text-slate-400">
                       {row.level ?? 'Unknown'} · expect {formatPgc(row.expectedPgc)}
@@ -174,7 +181,7 @@ export function RepTable({
                     <button
                       type="button"
                       aria-pressed={isFocus}
-                      aria-label={`${isFocus ? 'Remove' : 'Mark'} ${row.name} as focus this week`}
+                      aria-label={`${isFocus ? 'Remove' : 'Mark'} ${row.name} as ${SLICE_SHORT[slice]} focus this week`}
                       onClick={(e) => {
                         e.stopPropagation()
                         onToggleFocus(row.name)
@@ -185,8 +192,13 @@ export function RepTable({
                           : 'bg-white text-slate-500 ring-slate-200 hover:ring-fuchsia-300'
                       }`}
                     >
-                      {isFocus ? 'This week' : 'Off'}
+                      {isFocus ? `${SLICE_SHORT[slice]} focus` : 'Off'}
                     </button>
+                    {also.length > 0 && (
+                      <div className="mt-1 text-[10px] text-fuchsia-500">
+                        also {also.map((s) => SLICE_SHORT[s]).join(', ')}
+                      </div>
+                    )}
                     {!isFocus && prior && (
                       <div className="mt-1 text-[10px] text-violet-500">was {formatWeek(prior)}</div>
                     )}
@@ -204,6 +216,13 @@ export function RepTable({
                   </td>
                   <td className="px-3 py-3 text-right tabular-nums">
                     <PgcStatus value={row.wtdPgc} atTarget={row.wtdAtTarget} expected={row.expectedPgc} />
+                    <div className="text-[10px] text-slate-400">
+                      {row.wtdPgc == null
+                        ? '—'
+                        : row.wtdCc90 == null
+                          ? 'cc90 —'
+                          : `${row.wtdCc90.toLocaleString()} cc90`}
+                    </div>
                     {row.wtdVsLast != null && (
                       <div className="text-[10px]">
                         <Delta value={row.wtdVsLast} />
@@ -213,18 +232,15 @@ export function RepTable({
                   <td className="px-3 py-3 text-right tabular-nums">
                     <Delta value={row.deltaWow} />
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums">
+                  <td className="px-4 py-3 text-right tabular-nums sm:px-5">
                     <Delta value={row.delta3wk} />
-                  </td>
-                  <td className="px-4 py-3 text-center text-lg sm:px-5">
-                    <TrendMark trend={row.trend} />
                   </td>
                 </tr>
               )
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
+                <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
                   No reps in this view.
                 </td>
               </tr>
@@ -232,10 +248,11 @@ export function RepTable({
           </tbody>
         </table>
       </div>
-      <p className="border-t border-slate-100 px-5 py-2 text-xs text-slate-400">
-        Green chips meet that rep’s LC expectation. LC4 is the slice bar ({formatPgc(targetPgc)}). Team pGC
-        is CC90-weighted. Total pGC is Supergroup. WTD is this Sunday through today from Looker.
-        Focus is only for that calendar week and does not carry forward.
+      <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
+        Green chips meet that rep’s LC expectation. LC4 is the slice bar ({formatPgc(targetPgc)}). Deltas are in
+        bps (100 bps = 1%). Team pGC is CC90-weighted. WTD is this Sunday through today. Focus is for that
+        calendar week and that audience (HS, K12, or Super). Hide removes a rep from this view until you restore
+        them.
       </p>
     </div>
   )

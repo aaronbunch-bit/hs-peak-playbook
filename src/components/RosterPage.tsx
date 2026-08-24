@@ -6,12 +6,24 @@ import type { RosterEntry } from '../lib/types'
 type Props = {
   roster: RosterEntry[]
   manager: string | null
+  hidden: Set<string>
   targets: Targets
   lcCurves: LcCurves
   onSetLevel: (name: string, level: string | null) => void
+  onHide: (name: string) => void
+  onShow: (name: string) => void
 }
 
-export function RosterPage({ roster, manager, targets, lcCurves, onSetLevel }: Props) {
+export function RosterPage({
+  roster,
+  manager,
+  hidden,
+  targets,
+  lcCurves,
+  onSetLevel,
+  onHide,
+  onShow,
+}: Props) {
   const rows = [...roster]
     .filter((r) => !manager || r.manager === manager)
     .sort((a, b) => {
@@ -57,11 +69,17 @@ export function RosterPage({ roster, manager, targets, lcCurves, onSetLevel }: P
                 <th className="px-4 py-3 text-right text-[11px] font-semibold tracking-wide text-slate-500 uppercase sm:px-5">
                   Super expect
                 </th>
+                <th className="px-4 py-3 text-right text-[11px] font-semibold tracking-wide text-slate-500 uppercase sm:px-5">
+                  Playbook
+                </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.name} className="border-b border-slate-100 last:border-0">
+                <tr
+                  key={row.name}
+                  className={`border-b border-slate-100 last:border-0 ${hidden.has(row.name) ? 'bg-amber-50/40' : ''}`}
+                >
                   <td className="px-4 py-2.5 font-medium text-slate-900 sm:px-5">{row.name}</td>
                   <td className="px-3 py-2.5 text-slate-600">{row.manager ?? '—'}</td>
                   <td className="px-3 py-2.5">
@@ -92,11 +110,30 @@ export function RosterPage({ roster, manager, targets, lcCurves, onSetLevel }: P
                   <td className="px-4 py-2.5 text-right tabular-nums text-slate-700 sm:px-5">
                     {formatPgc(expectedPgc(targets.super, row.level, lcCurves))}
                   </td>
+                  <td className="px-4 py-2.5 text-right sm:px-5">
+                    {hidden.has(row.name) ? (
+                      <button
+                        type="button"
+                        onClick={() => onShow(row.name)}
+                        className="rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800 ring-1 ring-amber-200"
+                      >
+                        Hidden · Show
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onHide(row.name)}
+                        className="rounded-full bg-white px-2.5 py-1 text-xs font-medium text-slate-500 ring-1 ring-slate-200 hover:text-slate-800"
+                      >
+                        Hide
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
                     No reps in this view.
                   </td>
                 </tr>

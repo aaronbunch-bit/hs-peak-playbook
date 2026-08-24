@@ -35,13 +35,13 @@ body {
 }
 
 .seg-btn {
-  @apply rounded-full px-3.5 py-1.5 text-sm font-medium transition;
+  @apply rounded-md px-3 py-1.5 text-sm font-medium transition;
 }
 
 .seg-btn[data-on='true'] {
   background: #1b1f2a;
   color: white;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.2);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.18);
 }
 
 .seg-btn[data-on='false'] {
@@ -49,5 +49,45 @@ body {
 }
 
 .seg-btn[data-on='false']:hover {
-  background: rgb(255 255 255 / 0.7);
+  background: rgb(255 255 255 / 0.85);
+}
+
+.nav-tab {
+  @apply relative pb-0.5 text-sm font-semibold text-slate-400 transition;
+}
+
+.nav-tab[data-on='true'] {
+  color: #1b1f2a;
+}
+
+.nav-tab[data-on='true']::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -6px;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #e11d8a, #7c3aed, #38bdf8);
+}
+
+.nav-tab[data-on='false']:hover {
+  color: #334155;
+}
+
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid rgb(255 255 255 / 0.85);
+  background: rgb(255 255 255 / 0.88);
+  box-shadow: 0 1px 2px rgb(124 58 237 / 0.06);
+}
+
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, #e11d8a, #7c3aed, #38bdf8);
 }

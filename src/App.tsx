@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { FilterBar } from './components/FilterBar'
+import { FocusList } from './components/FocusList'
 import { KpiStrip } from './components/KpiStrip'
 import { RepDrawer } from './components/RepDrawer'
 import { RepTable, type SortKey } from './components/RepTable'
@@ -7,13 +8,16 @@ import { RosterPage } from './components/RosterPage'
 import { SettingsPanel } from './components/SettingsPanel'
 import { sundayWeekStart } from './lib/calendar'
 import {
+  focusedThisWeek,
   historyFromStore,
   lastFocusWeekBefore,
   loadFocus,
   namesForWeek,
   saveFocus,
+  slicesForRep,
   toggleFocus,
 } from './lib/focus'
+import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
 import { readHash, staffingAllowed, writeHash, type AppTab } from './lib/hash'
 import { fetchPacerData, SLICE_LOOKER_FILTERS } from './lib/looker'
 import { buildRows, formatWeek, mergeFocusLog, weekKpis } from './lib/pacer'
@@ -23,6 +27,7 @@ import {
   saveRosterLevels,
   setRosterLevel,
 } from './lib/roster'
+import { hideRep, loadHiddenReps, saveHiddenReps, showRep } from './lib/hidden'
 import { loadSettings, saveSettings, targetForSlice, type AppSettings } from './lib/settings'
 import { suggestFocuses } from './lib/suggest'
 import type { Cohort, PacerPayload, Slice, Staffing } from './lib/types'
@@ -38,8 +43,10 @@ export default function App() {
   const [weekIndex, setWeekIndex] = useState(0)
   const [compareWow, setCompareWow] = useState(true)
   const [focus, setFocus] = useState(loadFocus)
+  const [notes, setNotes] = useState(loadNotes)
   const [settings, setSettings] = useState(loadSettings)
   const [rosterLevels, setRosterLevels] = useState(loadRosterLevels)
+  const [hiddenReps, setHiddenReps] = useState(loadHiddenReps)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('pgc')
@@ -115,10 +122,14 @@ export default function App() {
     if (!staffingAllowed(next)) setStaffing('primary')
   }
 
-  const focusedSet = useMemo(() => new Set(namesForWeek(focus, focusWeek)), [focus, focusWeek])
+  const focusedSet = useMemo(
+    () => new Set(namesForWeek(focus, focusWeek, slice)),
+    [focus, focusWeek, slice],
+  )
+  const kpiFocusWeek = weekIndex === 0 ? focusWeek : (selectedWeek ?? focusWeek)
   const thatWeekFocusSet = useMemo(
-    () => new Set(namesForWeek(focus, selectedWeek ?? focusWeek)),
-    [focus, selectedWeek, focusWeek],
+    () => new Set(namesForWeek(focus, kpiFocusWeek, slice)),
+    [focus, kpiFocusWeek, slice],
   )
 
   const allRows = useMemo(() => {
@@ -135,6 +146,13 @@ export default function App() {
     return manager ? built.filter((r) => r.manager === manager) : built
   }, [livePayload, cohort, focus, targetPgc, weekIndex, staffing, manager, settings.lcCurves])
 
+  const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
+
+  const visibleRows = useMemo(
+    () => allRows.filter((r) => !hiddenSet.has(r.name)),
+    [allRows, hiddenSet],
+  )
+
   const priorRows = useMemo(() => {
     if (!livePayload || livePayload.empty || weekIndex + 1 >= livePayload.weeks.length) return []
     const withHistory = {
@@ -146,18 +164,19 @@ export default function App() {
       staffing,
       lcCurves: settings.lcCurves,
     })
-    return manager ? built.filter((r) => r.manager === manager) : built
-  }, [livePayload, cohort, focus, targetPgc, weekIndex, staffing, manager, settings.lcCurves])
+    const scoped = manager ? built.filter((r) => r.manager === manager) : built
+    return scoped.filter((r) => !hiddenSet.has(r.name))
+  }, [livePayload, cohort, focus, targetPgc, weekIndex, staffing, manager, settings.lcCurves, hiddenSet])
 
   const priorWeek = livePayload?.weeks[weekIndex + 1] ?? null
   const priorFocusSet = useMemo(
-    () => new Set(priorWeek ? namesForWeek(focus, priorWeek) : []),
+    () => new Set(priorWeek ? namesForWeek(focus, priorWeek, slice) : []),
     [focus, priorWeek],
   )
 
   const suggestions = useMemo(
-    () => suggestFocuses(allRows, settings.suggest, focusedSet),
-    [allRows, settings.suggest, focusedSet],
+    () => suggestFocuses(visibleRows, settings.suggest, focusedSet),
+    [visibleRows, settings.suggest, focusedSet],
   )
   const suggestedSet = useMemo(() => new Set(suggestions.map((s) => s.name)), [suggestions])
   const suggestedReasons = useMemo(() => {
@@ -166,17 +185,32 @@ export default function App() {
     return map
   }, [suggestions])
 
+  const catalogRows = useMemo(() => {
+    if (!livePayload || livePayload.empty) return []
+    const withHistory = {
+      ...livePayload,
+      focusLog: mergeFocusLog(livePayload.focusLog, historyFromStore(focus)),
+    }
+    return buildRows(withHistory, 'all', targetPgc, {
+      weekIndex: 0,
+      staffing,
+      lcCurves: settings.lcCurves,
+    })
+  }, [livePayload, focus, targetPgc, staffing, settings.lcCurves])
+
   const lastFocusMap = useMemo(() => {
     const map = new Map<string, string | null>()
-    for (const row of allRows) {
-      map.set(row.name, lastFocusWeekBefore(focus, row.name, focusWeek))
+    for (const row of [...visibleRows, ...catalogRows]) {
+      if (!map.has(row.name)) {
+        map.set(row.name, lastFocusWeekBefore(focus, row.name, focusWeek, slice))
+      }
     }
     return map
-  }, [allRows, focus, focusWeek])
+  }, [visibleRows, catalogRows, focus, focusWeek, slice])
 
   const rows = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1
-    return [...allRows].sort((a, b) => {
+    return [...visibleRows].sort((a, b) => {
       const aF = focusedSet.has(a.name) ? 0 : 1
       const bF = focusedSet.has(b.name) ? 0 : 1
       if (aF !== bF) return aF - bF
@@ -191,13 +225,45 @@ export default function App() {
       if (av === bv) return a.name.localeCompare(b.name)
       return dir * (Number(av) - Number(bv))
     })
-  }, [allRows, focusedSet, sortKey, sortDir])
+  }, [visibleRows, focusedSet, sortKey, sortDir])
 
-  const selectedRow = rows.find((r) => r.name === selected) ?? null
-  const currentKpis = weekKpis(allRows, thatWeekFocusSet)
+  const focusSlices = useMemo(() => {
+    const map = new Map<string, Slice[]>()
+    const names = new Set([...visibleRows.map((r) => r.name), ...focusedThisWeek(focus, focusWeek).map((f) => f.name)])
+    for (const name of names) map.set(name, slicesForRep(focus, name, focusWeek))
+    return map
+  }, [visibleRows, focus, focusWeek])
+
+  const focusItems = useMemo(() => {
+    const byName = new Map(catalogRows.map((r) => [r.name, r]))
+    const rosterByName = new Map((livePayload?.roster ?? []).map((r) => [r.name, r]))
+    return focusedThisWeek(focus, focusWeek)
+      .map(({ name, slices }) => {
+        const row = byName.get(name)
+        const roster = rosterByName.get(name)
+        const latest = row?.weeks[0]
+        return {
+          name,
+          manager: row?.manager ?? roster?.manager ?? null,
+          level: row?.level ?? roster?.level ?? null,
+          slices,
+          hsPgc: latest?.hsPgc ?? null,
+          hsCc90: latest?.hsCc90 ?? null,
+          k12Pgc: latest?.k12Pgc ?? null,
+          k12Cc90: latest?.k12Cc90 ?? null,
+          superPgc: latest?.totalPgc ?? null,
+          note: noteFor(notes, focusWeek, name),
+        }
+      })
+      .filter((item) => !manager || item.manager === manager)
+  }, [catalogRows, livePayload, focus, focusWeek, notes, manager])
+
+  const selectedRow =
+    rows.find((r) => r.name === selected) ?? catalogRows.find((r) => r.name === selected) ?? null
+  const currentKpis = weekKpis(visibleRows, thatWeekFocusSet)
   const priorKpis = priorRows.length ? weekKpis(priorRows, priorFocusSet) : null
   const wtdTeam = (() => {
-    const withWtd = allRows.filter((r) => r.wtdPgc != null)
+    const withWtd = visibleRows.filter((r) => r.wtdPgc != null)
     if (weekIndex !== 0 || withWtd.length === 0) return null
     return withWtd.reduce((sum, r) => sum + (r.wtdPgc ?? 0), 0) / withWtd.length
   })()
@@ -210,10 +276,16 @@ export default function App() {
     }
   }
 
-  const onToggleFocus = (name: string) => {
-    const next = toggleFocus(focus, name, focusWeek)
+  const onToggleFocus = (name: string, audience: Slice = slice) => {
+    const next = toggleFocus(focus, name, focusWeek, audience)
     setFocus(next)
     saveFocus(next)
+  }
+
+  const onNoteChange = (name: string, text: string) => {
+    const next = setNote(notes, focusWeek, name, text)
+    setNotes(next)
+    saveNotes(next)
   }
 
   const onSettings = (next: AppSettings) => {
@@ -227,6 +299,19 @@ export default function App() {
     saveRosterLevels(next)
   }
 
+  const persistHidden = (next: string[]) => {
+    setHiddenReps(next)
+    saveHiddenReps(next)
+  }
+
+  const onHideRep = (name: string) => {
+    persistHidden(hideRep(hiddenReps, name))
+    if (selected === name) setSelected(null)
+  }
+
+  const onShowRep = (name: string) => persistHidden(showRep(hiddenReps, name))
+  const onRestoreHidden = () => persistHidden([])
+
   return (
     <div className="min-h-svh pb-16">
       <FilterBar
@@ -238,8 +323,8 @@ export default function App() {
         manager={manager}
         weeks={livePayload?.weeks ?? []}
         weekIndex={weekIndex}
-        compareWow={compareWow}
         targets={settings.targets}
+        hiddenCount={hiddenReps.length}
         onTab={(next) => {
           setTab(next)
           setSelected(null)
@@ -249,7 +334,7 @@ export default function App() {
         onManager={setManager}
         onStaffing={setStaffing}
         onWeekIndex={setWeekIndex}
-        onCompareWow={setCompareWow}
+        onRestoreHidden={onRestoreHidden}
         onOpenSettings={() => setSettingsOpen(true)}
         onRefresh={() => setReload((n) => n + 1)}
       />
@@ -257,13 +342,33 @@ export default function App() {
       <main className="mt-4 space-y-4">
         {!livePayload || livePayload.slice !== slice ? (
           <div className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">Loading week…</div>
+        ) : tab === 'focus' ? (
+          livePayload.empty ? (
+            <div className="mx-auto max-w-6xl px-4 sm:px-6">
+              <div className="rounded-2xl border border-dashed border-sky-200 bg-white/80 px-6 py-12 text-center">
+                <p className="text-lg font-semibold text-slate-800">Focus list</p>
+                <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{livePayload.emptyReason}</p>
+              </div>
+            </div>
+          ) : (
+            <FocusList
+              week={focusWeek}
+              items={focusItems}
+              selected={selected}
+              onSelect={setSelected}
+              onToggle={onToggleFocus}
+            />
+          )
         ) : tab === 'roster' ? (
           <RosterPage
             roster={livePayload.roster}
             manager={manager}
+            hidden={hiddenSet}
             targets={settings.targets}
             lcCurves={settings.lcCurves}
             onSetLevel={onSetLevel}
+            onHide={onHideRep}
+            onShow={onShowRep}
           />
         ) : livePayload.empty ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
@@ -283,9 +388,10 @@ export default function App() {
               compareWow={compareWow}
               targetPgc={targetPgc}
               wtdPgc={wtdTeam}
-              wtdReady={weekIndex === 0 && allRows.some((r) => r.wtdPgc != null)}
+              wtdReady={weekIndex === 0 && visibleRows.some((r) => r.wtdPgc != null)}
               suggestedCount={suggestions.length}
               selectedWeekLabel={selectedWeek ? formatWeek(selectedWeek) : '—'}
+              onCompareWow={setCompareWow}
             />
             <RepTable
               rows={rows}
@@ -293,6 +399,7 @@ export default function App() {
               suggested={suggestedSet}
               suggestedReasons={suggestedReasons}
               lastFocusWeek={lastFocusMap}
+              focusSlices={focusSlices}
               selected={selected}
               sortKey={sortKey}
               sortDir={sortDir}
@@ -301,21 +408,25 @@ export default function App() {
               onSort={onSort}
               onSelect={setSelected}
               onToggleFocus={onToggleFocus}
+              onHide={onHideRep}
             />
           </>
         )}
       </main>
 
       <RepDrawer
-        row={tab === 'playbook' ? selectedRow : null}
-        focused={selectedRow ? focusedSet.has(selectedRow.name) : false}
-        lastFocusWeek={selectedRow ? lastFocusMap.get(selectedRow.name) ?? null : null}
+        row={tab === 'roster' ? null : selectedRow}
+        focusedSlices={selectedRow ? slicesForRep(focus, selectedRow.name, focusWeek) : []}
+        lastFocusWeek={selectedRow ? lastFocusMap.get(selectedRow.name) ?? lastFocusWeekBefore(focus, selectedRow.name, focusWeek, slice) : null}
         suggestedReasons={selectedRow ? suggestedReasons.get(selectedRow.name) ?? [] : []}
         focusWeek={focusWeek}
         wtdAsOf={livePayload?.wtdAsOf ?? null}
         slice={slice}
+        note={selectedRow ? noteFor(notes, focusWeek, selectedRow.name) : ''}
+        noteHistory={selectedRow ? notesForRep(notes, selectedRow.name) : []}
         onClose={() => setSelected(null)}
-        onToggleFocus={() => selectedRow && onToggleFocus(selectedRow.name)}
+        onToggleFocus={(audience) => selectedRow && onToggleFocus(selectedRow.name, audience)}
+        onNoteChange={(text) => selectedRow && onNoteChange(selectedRow.name, text)}
       />
 
       <SettingsPanel

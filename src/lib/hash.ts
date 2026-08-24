@@ -1,6 +1,6 @@
 import { COHORTS, SLICES, STAFFINGS, type Cohort, type Slice, type Staffing } from './types'
 
-export type AppTab = 'playbook' | 'roster'
+export type AppTab = 'playbook' | 'roster' | 'focus'
 
 export type HashState = {
   slice: Slice
@@ -34,7 +34,7 @@ function isStaffing(v: string | null): v is Staffing {
 }
 
 function isTab(v: string | null): v is AppTab {
-  return v === 'playbook' || v === 'roster'
+  return v === 'playbook' || v === 'roster' || v === 'focus'
 }
 
 /** This look has no staffing / overflow flag. Cross Train stays an empty stub. */

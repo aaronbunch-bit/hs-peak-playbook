@@ -22,14 +22,28 @@ export function weekOverWeek(
   return current - previous
 }
 
-/** avg(newest 3) − avg(next 3). Needs six populated weeks, matching the sheet. */
+function avgNums(xs: number[]): number {
+  return xs.reduce((a, b) => a + b, 0) / xs.length
+}
+
+/**
+ * avg(newest 3 consecutive) − avg(next 3 consecutive) when six calendar weeks exist.
+ * If a week is missing, falls back to this week vs the average of the prior 3 populated weeks.
+ */
 export function delta3wk(newestFirst: Array<number | null | undefined>): number | null {
   const first = newestFirst.slice(0, 3)
   const second = newestFirst.slice(3, 6)
-  if (first.length < 3 || second.length < 3) return null
-  if (first.some((v) => v == null) || second.some((v) => v == null)) return null
-  const avg = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length
-  return avg(first as number[]) - avg(second as number[])
+  if (
+    first.length === 3 &&
+    second.length === 3 &&
+    first.every((v) => v != null) &&
+    second.every((v) => v != null)
+  ) {
+    return avgNums(first as number[]) - avgNums(second as number[])
+  }
+  const populated = newestFirst.filter((v): v is number => v != null)
+  if (populated.length < 4) return null
+  return populated[0] - avgNums(populated.slice(1, 4))
 }
 
 export function trendFromDelta(deltaWow: number | null): Trend | null {
@@ -156,11 +170,12 @@ export function formatPgc(value: number | null | undefined): string {
   return `${(value * 100).toFixed(1)}%`
 }
 
-export function formatPts(value: number | null | undefined): string {
+/** 1% = 100 bps. A 0.01 pGC delta (1 point) is 100 bps. */
+export function formatBps(value: number | null | undefined): string {
   if (value == null) return '—'
-  const pts = value * 100
-  const sign = pts > 0 ? '+' : ''
-  return `${sign}${pts.toFixed(1)} pts`
+  const bps = Math.round(value * 10000)
+  const sign = bps > 0 ? '+' : ''
+  return `${sign}${bps.toLocaleString('en-US')} bps`
 }
 
 export function formatWeek(iso: string): string {
@@ -173,10 +188,10 @@ export function mergeFocusLog(
   seed: FocusLogEntry[],
   extra: FocusLogEntry[],
 ): FocusLogEntry[] {
-  const seen = new Set(seed.map((e) => `${e.week}|${e.rep}`))
+  const seen = new Set(seed.map((e) => `${e.week}|${e.rep}|${e.slice ?? ''}`))
   const merged = [...seed]
   for (const e of extra) {
-    const key = `${e.week}|${e.rep}`
+    const key = `${e.week}|${e.rep}|${e.slice ?? ''}`
     if (!seen.has(key)) {
       seen.add(key)
       merged.push(e)

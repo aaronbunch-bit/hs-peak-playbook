@@ -1,4 +1,4 @@
-import { formatPgc } from './pacer'
+import { formatBps, formatPgc } from './pacer'
 import type { SuggestParams } from './settings'
 import type { RepRow } from './types'
 
@@ -32,7 +32,7 @@ export function suggestFocuses(
       reasons.push(`below ${formatPgc(expect)} ${lc} expect`)
     }
     if (declining) {
-      reasons.push(`WoW ${((row.deltaWow ?? 0) * 100).toFixed(1)} pts`)
+      reasons.push(`WoW ${formatBps(row.deltaWow)}`)
     }
 
     const qualifies =
