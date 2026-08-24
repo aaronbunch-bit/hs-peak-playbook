@@ -9,7 +9,7 @@ export const SLICE_LABELS: Record<Slice, string> = {
 export const SLICE_SHORT: Record<Slice, string> = {
   'hs-stem': 'HS',
   k12tp: 'K12',
-  supergroup: 'Super',
+  supergroup: 'SG',
 }
 
 export const FOCUS_SLICES: Slice[] = ['hs-stem', 'k12tp', 'supergroup']

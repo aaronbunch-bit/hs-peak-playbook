@@ -8,15 +8,10 @@ export type Suggestion = {
   reasons: string[]
 }
 
-export function suggestFocuses(
-  rows: RepRow[],
-  params: SuggestParams,
-  alreadyFocused: Set<string>,
-): Suggestion[] {
+export function suggestFocuses(rows: RepRow[], params: SuggestParams): Suggestion[] {
   const out: Suggestion[] = []
 
   for (const row of rows) {
-    if (alreadyFocused.has(row.name)) continue
     if (row.pgc == null) continue
 
     const cc90 = row.weeks[0]?.cc90

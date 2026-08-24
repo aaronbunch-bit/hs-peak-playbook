@@ -26,7 +26,7 @@ type Props = {
 function Delta({ value }: { value: number | null }) {
   if (value == null) return <span className="text-slate-400">—</span>
   const cls = value > 0 ? 'text-emerald-600' : value < 0 ? 'text-rose-600' : 'text-slate-500'
-  return <span className={cls}>{formatBps(value)}</span>
+  return <span className={`text-[15px] font-semibold tabular-nums ${cls}`}>{formatBps(value)}</span>
 }
 
 function SortBtn({
@@ -48,7 +48,7 @@ function SortBtn({
       onClick={onClick}
       className={`inline-flex items-center gap-1 text-[11px] font-semibold tracking-wide uppercase ${
         align === 'right' ? 'w-full justify-end' : ''
-      } ${active ? 'text-slate-900' : 'text-slate-500 hover:text-slate-800'}`}
+      } ${active ? 'text-white' : 'text-slate-300 hover:text-white'}`}
     >
       {label}
       <span className="text-[10px]">{active ? (dir === 'asc' ? '▲' : '▼') : ''}</span>
@@ -77,23 +77,23 @@ export function RepTable({
     <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl surface">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-slate-50 text-left">
-            <tr className="border-b border-slate-200/70">
+          <thead className="bg-slate-900 text-left">
+            <tr>
               <th className="px-4 py-3 font-medium sm:px-5">
-                <div className="flex items-center gap-3">
-                  <SortBtn label="Rep" active={sortKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
-                  <SortBtn
-                    label="Manager"
-                    active={sortKey === 'manager'}
-                    dir={sortDir}
-                    onClick={() => onSort('manager')}
-                  />
-                </div>
+                <SortBtn label="Rep" active={sortKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
+              </th>
+              <th className="px-3 py-3 font-medium">
+                <SortBtn
+                  label="Manager"
+                  active={sortKey === 'manager'}
+                  dir={sortDir}
+                  onClick={() => onSort('manager')}
+                />
               </th>
               <th className="px-3 py-3 text-center font-medium">
-                <span className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Focus</span>
+                <span className="text-[11px] font-semibold tracking-wide text-slate-300 uppercase">Focus</span>
               </th>
-              <th className="px-3 py-3 text-right font-medium">
+              <th className="border-l border-white/10 px-3 py-3 text-right font-medium">
                 <SortBtn
                   label="Last wk pGC"
                   active={sortKey === 'pgc'}
@@ -132,9 +132,9 @@ export function RepTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => {
+            {rows.map((row, i) => {
               const isFocus = focused.has(row.name)
-              const isSug = suggested.has(row.name)
+              const isSug = !isFocus && suggested.has(row.name)
               const isSel = selected === row.name
               const prior = lastFocusWeek.get(row.name)
               const also = (focusSlices.get(row.name) ?? []).filter((s) => s !== slice)
@@ -143,15 +143,15 @@ export function RepTable({
                   key={row.name}
                   onClick={() => onSelect(row.name)}
                   className={`group cursor-pointer border-b border-slate-100 transition last:border-0 ${
-                    isSel ? 'bg-sky-50' : isFocus ? 'bg-slate-50' : 'hover:bg-slate-50'
-                  }`}
+                    isSel ? 'bg-sky-50' : i % 2 === 1 ? 'bg-slate-50/80' : 'bg-white'
+                  } hover:bg-indigo-50/70`}
                 >
                   <td className="relative w-px whitespace-nowrap px-4 py-3 sm:px-5">
                     {isFocus && (
                       <span className="absolute inset-y-2 left-0 w-1 rounded-full bg-gradient-to-b from-fuchsia-500 to-violet-500" />
                     )}
                     <div className="flex items-center gap-1.5">
-                      <span className="font-medium text-slate-900">{row.name}</span>
+                      <span className="text-[15px] font-semibold text-slate-900">{row.name}</span>
                       {isSug && (
                         <span
                           className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
@@ -172,10 +172,11 @@ export function RepTable({
                         Hide
                       </button>
                     </div>
-                    <div className="text-xs text-slate-500">
-                      {row.manager ?? 'No manager'} · {row.level ?? 'Unknown'} · {formatPgc(row.expectedPgc)}
+                    <div className="text-xs text-slate-400">
+                      {row.level ?? 'Unknown'} · expect {formatPgc(row.expectedPgc)}
                     </div>
                   </td>
+                  <td className="w-px whitespace-nowrap px-3 py-3 text-slate-600">{row.manager ?? '—'}</td>
                   <td className="w-px whitespace-nowrap px-3 py-3 text-center">
                     <button
                       type="button"
@@ -202,7 +203,7 @@ export function RepTable({
                       <div className="mt-1 text-[10px] text-violet-500">was {formatWeek(prior)}</div>
                     )}
                   </td>
-                  <td className="px-3 py-3 text-right">
+                  <td className="border-l border-slate-100 px-3 py-3 text-right">
                     <div className="flex flex-col items-end gap-0.5">
                       <PgcStatus value={row.pgc} atTarget={row.atTarget} expected={row.expectedPgc} />
                       <div className="text-[10px] text-slate-400">
@@ -248,10 +249,10 @@ export function RepTable({
         </table>
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-        Green chips meet that rep’s LC expectation. LC4 is the slice bar ({formatPgc(targetPgc)}). Deltas are in
-        bps (100 bps = 1%). Team pGC is CC90-weighted. WTD is this Sunday through today. Focus is for that
-        calendar week and that audience (HS, K12, or Super). Hide removes a rep from this view until you restore
-        them.
+        Green chips meet that rep’s LC expectation; rose chips are below. LC4 is the slice bar (
+        {formatPgc(targetPgc)}). Deltas are in bps (100 bps = 1%). Team pGC is CC90-weighted. WTD is this Sunday
+        through today. Focus tags stack — marking one rep does not clear another. Focus is for that calendar week
+        and that audience (HS, K12, or SG). Hide removes a rep from this view until you restore them.
       </p>
     </div>
   )

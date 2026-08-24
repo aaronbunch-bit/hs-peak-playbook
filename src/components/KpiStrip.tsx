@@ -43,6 +43,7 @@ export function KpiStrip({
   const cards = [
     {
       label: 'Team pGC',
+      tone: 'magenta',
       value: formatPgc(current.teamPgc),
       hint: compareWow ? (
         <DeltaHint current={current.teamPgc} prior={prior?.teamPgc ?? null} kind="pgc" />
@@ -52,11 +53,13 @@ export function KpiStrip({
     },
     {
       label: 'WTD pGC',
+      tone: 'sky',
       value: formatPgc(wtdPgc),
       hint: wtdReady ? 'this Sunday → today' : 'awaiting Looker',
     },
     {
       label: 'At target',
+      tone: 'emerald',
       value: String(current.atTarget),
       hint: compareWow ? (
         <DeltaHint current={current.atTarget} prior={prior?.atTarget ?? null} kind="count" />
@@ -66,6 +69,7 @@ export function KpiStrip({
     },
     {
       label: 'Improving',
+      tone: 'amber',
       value: String(current.improving),
       hint: compareWow ? (
         <DeltaHint current={current.improving} prior={prior?.improving ?? null} kind="count" />
@@ -75,6 +79,7 @@ export function KpiStrip({
     },
     {
       label: 'Focus that week',
+      tone: 'violet',
       value: String(current.focusCount),
       hint: compareWow ? (
         <DeltaHint current={current.focusCount} prior={prior?.focusCount ?? null} kind="count" />
@@ -99,7 +104,7 @@ export function KpiStrip({
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
         {cards.map((c) => (
-          <div key={c.label} className="kpi-card px-4 py-3">
+          <div key={c.label} className="kpi-card px-4 py-3" data-tone={c.tone}>
             <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{c.label}</p>
             <p className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{c.value}</p>
             <p className="text-xs text-slate-400">{c.hint}</p>

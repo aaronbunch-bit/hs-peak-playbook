@@ -30,7 +30,7 @@ export function PgcStatus({ value, atTarget, expected, size = 'sm' }: Props) {
   }
   return (
     <span
-      className={`inline-flex items-center rounded-full bg-slate-100 text-slate-600 tabular-nums ${pad}`}
+      className={`inline-flex items-center rounded-full bg-rose-50 font-semibold text-rose-800 tabular-nums ${pad}`}
       title={title}
     >
       {formatPgc(value)}

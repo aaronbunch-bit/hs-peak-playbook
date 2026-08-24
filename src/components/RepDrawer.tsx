@@ -19,12 +19,16 @@ type Props = {
 }
 
 function Sparkline({
-  values,
+  points,
   target,
+  onPick,
 }: {
-  values: Array<number | null>
+  points: Array<{ week: string; pgc: number | null }>
   target: number
+  onPick?: (week: string) => void
 }) {
+  const [hover, setHover] = useState<number | null>(null)
+  const values = points.map((p) => p.pgc)
   const nums = values.filter((v): v is number => v != null)
   const w = 320
   const h = 96
@@ -42,26 +46,61 @@ function Sparkline({
     .filter(Boolean)
     .join(' ')
   const ty = y(target)
+  const active = hover != null ? points[hover] : null
+  const activeVal = hover != null ? values[hover] : null
 
   return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="h-24 w-full" role="img" aria-label="pGC sparkline">
-      <line x1={pad} x2={w - pad} y1={ty} y2={ty} stroke="#c4b5fd" strokeDasharray="4 4" strokeWidth="1" />
-      <text x={w - pad} y={Math.max(12, ty - 4)} textAnchor="end" className="fill-violet-400" fontSize="10">
-        {(target * 100).toFixed(1)}%
-      </text>
-      <polyline fill="none" stroke="url(#pgcLine)" strokeWidth="2.5" points={pts} strokeLinejoin="round" />
-      {values.map((v, i) =>
-        v == null ? null : (
-          <circle key={i} cx={x(i)} cy={y(v)} r="3.2" fill={v >= target ? '#059669' : '#e11d8a'} />
-        ),
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${w} ${h}`}
+        className="h-24 w-full overflow-visible"
+        role="img"
+        aria-label="pGC sparkline"
+        onMouseLeave={() => setHover(null)}
+      >
+        <line x1={pad} x2={w - pad} y1={ty} y2={ty} stroke="#c4b5fd" strokeDasharray="4 4" strokeWidth="1" />
+        <text x={w - pad} y={Math.max(12, ty - 4)} textAnchor="end" className="fill-violet-400" fontSize="10">
+          {(target * 100).toFixed(1)}%
+        </text>
+        <polyline fill="none" stroke="url(#pgcLine)" strokeWidth="2.5" points={pts} strokeLinejoin="round" />
+        {points.map((p, i) =>
+          p.pgc == null ? null : (
+            <g key={p.week}>
+              <circle
+                cx={x(i)}
+                cy={y(p.pgc)}
+                r={hover === i ? 5 : 3.2}
+                fill={p.pgc >= target ? '#059669' : '#e11d8a'}
+              />
+              <circle
+                cx={x(i)}
+                cy={y(p.pgc)}
+                r="10"
+                fill="transparent"
+                className="cursor-pointer"
+                onMouseEnter={() => setHover(i)}
+                onClick={() => onPick?.(p.week)}
+              >
+                <title>
+                  Week of {formatWeek(p.week)} · {formatPgc(p.pgc)}
+                </title>
+              </circle>
+            </g>
+          ),
+        )}
+        <defs>
+          <linearGradient id="pgcLine" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0%" stopColor="#e11d8a" />
+            <stop offset="100%" stopColor="#38bdf8" />
+          </linearGradient>
+        </defs>
+      </svg>
+      {active && activeVal != null && (
+        <div className="pointer-events-none absolute top-0 right-0 rounded-lg bg-slate-900 px-2 py-1 text-[11px] font-medium text-white shadow-lg">
+          Week of {formatWeek(active.week)} · {formatPgc(activeVal)}
+        </div>
       )}
-      <defs>
-        <linearGradient id="pgcLine" x1="0" x2="1" y1="0" y2="0">
-          <stop offset="0%" stopColor="#e11d8a" />
-          <stop offset="100%" stopColor="#38bdf8" />
-        </linearGradient>
-      </defs>
-    </svg>
+    </div>
   )
 }
 
@@ -180,7 +219,11 @@ export function RepDrawer({
             <p className="mb-1 text-xs font-semibold tracking-wide text-slate-500 uppercase">
               Closed weeks · oldest → newest
             </p>
-            <Sparkline values={chrono.map((w) => w.pgc)} target={row.expectedPgc} />
+            <Sparkline
+              points={chrono.map((w) => ({ week: w.week, pgc: w.pgc }))}
+              target={row.expectedPgc}
+              onPick={setNoteWeek}
+            />
           </div>
 
           <div className="mt-3 rounded-2xl bg-slate-50 p-3 ring-1 ring-slate-100">

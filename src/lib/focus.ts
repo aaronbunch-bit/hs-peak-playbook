@@ -15,6 +15,12 @@ function unique(names: string[]): string[] {
   return [...new Set(names.filter(Boolean))]
 }
 
+function namesOf(value: unknown): string[] {
+  if (Array.isArray(value)) return unique(value.filter((n): n is string => typeof n === 'string'))
+  if (typeof value === 'string' && value.trim()) return [value]
+  return []
+}
+
 function weekMap(store: FocusStore, week: string): Partial<Record<Slice, string[]>> {
   return store.byWeek[week] ?? {}
 }
@@ -31,8 +37,8 @@ function fromV2(byWeek: Record<string, unknown>): FocusStore {
       const slices = value as Partial<Record<Slice, string[]>>
       next.byWeek[week] = {}
       for (const slice of FOCUS_SLICES) {
-        const names = slices[slice]
-        if (Array.isArray(names) && names.length) next.byWeek[week][slice] = unique(names)
+        const names = namesOf(slices[slice])
+        if (names.length) next.byWeek[week][slice] = names
       }
     }
   }
@@ -65,7 +71,7 @@ export function saveFocus(store: FocusStore): void {
 }
 
 export function namesForWeek(store: FocusStore, week: string, slice: Slice): string[] {
-  return weekMap(store, week)[slice] ?? []
+  return namesOf(weekMap(store, week)[slice])
 }
 
 export function slicesForRep(store: FocusStore, name: string, week: string): Slice[] {
@@ -85,8 +91,9 @@ export function focusedThisWeek(store: FocusStore, week: string): Array<{ name: 
 }
 
 export function toggleFocus(store: FocusStore, name: string, week: string, slice: Slice): FocusStore {
-  const current = weekMap(store, week)[slice] ?? []
+  const current = namesOf(weekMap(store, week)[slice])
   const on = current.includes(name)
+  // Marking one rep never clears another. Off only removes this name.
   const nextNames = on ? current.filter((n) => n !== name) : unique([...current, name])
   const nextWeek = { ...weekMap(store, week), [slice]: nextNames }
   if (nextNames.length === 0) delete nextWeek[slice]

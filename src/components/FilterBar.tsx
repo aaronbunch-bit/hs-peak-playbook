@@ -76,7 +76,7 @@ export function FilterBar({
   const selectedWeek = weeks[weekIndex]
   const activeTarget = targetForSlice(slice, targets)
   const playbook = tab === 'playbook'
-  const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'Super'
+  const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'SG'
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur-md">
@@ -86,7 +86,7 @@ export function FilterBar({
             <div>
               <p className="text-[10px] font-semibold tracking-[0.18em] text-slate-400 uppercase">Varsity Tutors</p>
               <h1 className="text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-                HS Peak Playbook
+                HS <span className="title-gradient">Peak</span> Playbook
               </h1>
             </div>
             <nav className="flex items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">

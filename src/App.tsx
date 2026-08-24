@@ -50,7 +50,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
   const [sortKey, setSortKey] = useState<SortKey>('pgc')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [reload, setReload] = useState(0)
 
   const focusWeek = sundayWeekStart()
@@ -175,8 +175,8 @@ export default function App() {
   )
 
   const suggestions = useMemo(
-    () => suggestFocuses(visibleRows, settings.suggest, focusedSet),
-    [visibleRows, settings.suggest, focusedSet],
+    () => suggestFocuses(visibleRows, settings.suggest),
+    [visibleRows, settings.suggest],
   )
   const suggestedSet = useMemo(() => new Set(suggestions.map((s) => s.name)), [suggestions])
   const suggestedReasons = useMemo(() => {
@@ -211,9 +211,6 @@ export default function App() {
   const rows = useMemo(() => {
     const dir = sortDir === 'asc' ? 1 : -1
     return [...visibleRows].sort((a, b) => {
-      const aF = focusedSet.has(a.name) ? 0 : 1
-      const bF = focusedSet.has(b.name) ? 0 : 1
-      if (aF !== bF) return aF - bF
       const av = a[sortKey]
       const bv = b[sortKey]
       if (sortKey === 'name' || sortKey === 'manager') {
@@ -225,7 +222,7 @@ export default function App() {
       if (av === bv) return a.name.localeCompare(b.name)
       return dir * (Number(av) - Number(bv))
     })
-  }, [visibleRows, focusedSet, sortKey, sortDir])
+  }, [visibleRows, sortKey, sortDir])
 
   const focusSlices = useMemo(() => {
     const map = new Map<string, Slice[]>()
@@ -272,7 +269,7 @@ export default function App() {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else {
       setSortKey(key)
-      setSortDir(key === 'name' || key === 'manager' ? 'asc' : 'desc')
+      setSortDir(key === 'name' || key === 'manager' || key === 'pgc' ? 'asc' : 'desc')
     }
   }
 
