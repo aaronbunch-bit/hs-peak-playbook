@@ -48,7 +48,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function Seg({ children }: { children: ReactNode }) {
-  return <div className="flex shrink-0 rounded-lg bg-slate-100/80 p-0.5">{children}</div>
+  return <div className="flex shrink-0 rounded-lg bg-slate-900/10 p-0.5">{children}</div>
 }
 
 export function FilterBar({
@@ -79,7 +79,7 @@ export function FilterBar({
   const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'Super'
 
   return (
-    <header className="sticky top-0 z-20 border-b border-white/50 bg-white/70 backdrop-blur-xl">
+    <header className="sticky top-0 z-20 border-b border-violet-200/40 bg-[#1b1f2a]/[0.06] backdrop-blur-xl">
       <div className="mx-auto max-w-6xl px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-4">
@@ -120,7 +120,7 @@ export function FilterBar({
         </div>
 
         {playbook && (
-          <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl border border-white/80 bg-white/70 px-3.5 py-3 shadow-sm shadow-violet-100/40">
+          <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
             <Field label="Audience">
               <Seg>
                 {SLICES.map((s) => (
@@ -240,7 +240,7 @@ export function FilterBar({
         )}
 
         {tab === 'focus' && (
-          <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2 rounded-2xl border border-white/80 bg-white/70 px-3.5 py-3 shadow-sm shadow-violet-100/40">
+          <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2 rounded-2xl surface px-3.5 py-3">
             <Field label="Manager">
               <select
                 value={manager ?? ''}
@@ -260,7 +260,7 @@ export function FilterBar({
         )}
 
         {tab === 'roster' && (
-          <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2 rounded-2xl border border-white/80 bg-white/70 px-3.5 py-3 shadow-sm shadow-violet-100/40">
+          <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2 rounded-2xl surface px-3.5 py-3">
             <Field label="Manager">
               <select
                 value={manager ?? ''}

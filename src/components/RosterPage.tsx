@@ -48,10 +48,10 @@ export function RosterPage({
         </p>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-white/80 bg-white/85 shadow-sm shadow-slate-200/80">
+      <div className="overflow-hidden rounded-2xl surface">
         <div className="overflow-x-auto">
           <table className="w-full border-collapse text-sm">
-            <thead className="bg-slate-50/90 text-left">
+            <thead className="bg-slate-900/[0.06] text-left">
               <tr className="border-b border-slate-200/80">
                 <th className="px-4 py-3 text-[11px] font-semibold tracking-wide text-slate-500 uppercase sm:px-5">
                   Rep

@@ -47,9 +47,9 @@ export function FocusList({ week, items, selected, onSelect, onToggle }: Props) 
         return (
           <section
             key={slice}
-            className="overflow-hidden rounded-2xl border border-white/80 bg-white/90 shadow-sm shadow-violet-100/50"
+            className="overflow-hidden rounded-2xl surface"
           >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3 sm:px-5">
+            <div className="flex items-center justify-between border-b border-violet-200/40 px-4 py-3 sm:px-5">
               <h3 className="text-sm font-semibold text-slate-800">{SLICE_LABELS[slice]}</h3>
               <p className="text-xs text-slate-400">{rows.length === 0 ? 'None' : `${rows.length}`}</p>
             </div>
@@ -67,7 +67,7 @@ export function FocusList({ week, items, selected, onSelect, onToggle }: Props) 
                         type="button"
                         onClick={() => onSelect(item.name)}
                         className={`flex w-full flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-100 px-4 py-3 text-left last:border-0 sm:px-5 ${
-                          selected === item.name ? 'bg-sky-50/80' : 'hover:bg-slate-50/90'
+                          selected === item.name ? 'bg-sky-200/40' : 'hover:bg-white/40'
                         }`}
                       >
                         <div className="min-w-40 flex-1">

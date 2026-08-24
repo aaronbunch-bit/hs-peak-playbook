@@ -74,10 +74,10 @@ export function RepTable({
   onHide,
 }: Props) {
   return (
-    <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl border border-white/80 bg-white/90 shadow-sm shadow-violet-100/50">
+    <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl surface">
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm">
-          <thead className="bg-slate-50/80 text-left">
+          <thead className="bg-slate-900/[0.06] text-left">
             <tr className="border-b border-slate-200/70">
               <th className="px-4 py-3 font-medium sm:px-5">
                 <SortBtn label="Rep" active={sortKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
@@ -143,7 +143,7 @@ export function RepTable({
                   key={row.name}
                   onClick={() => onSelect(row.name)}
                   className={`group cursor-pointer border-b border-slate-100/90 transition last:border-0 ${
-                    isSel ? 'bg-sky-50/80' : isFocus ? 'bg-fuchsia-50/60' : 'hover:bg-slate-50/90'
+                    isSel ? 'bg-sky-200/40' : isFocus ? 'bg-fuchsia-200/35' : 'hover:bg-white/45'
                   }`}
                 >
                   <td className="relative px-4 py-3 sm:px-5">
@@ -248,7 +248,7 @@ export function RepTable({
           </tbody>
         </table>
       </div>
-      <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
+      <p className="border-t border-violet-200/40 px-5 py-2.5 text-xs text-slate-500">
         Green chips meet that rep’s LC expectation. LC4 is the slice bar ({formatPgc(targetPgc)}). Deltas are in
         bps (100 bps = 1%). Team pGC is CC90-weighted. WTD is this Sunday through today. Focus is for that
         calendar week and that audience (HS, K12, or Super). Hide removes a rep from this view until you restore

@@ -22,9 +22,10 @@ body {
   font-family: var(--font-sans);
   color: var(--color-ink);
   background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(225, 29, 138, 0.12), transparent 55%),
-    radial-gradient(900px 480px at 100% 0%, rgba(56, 189, 248, 0.16), transparent 50%),
-    linear-gradient(180deg, #fbfaff 0%, #eef4ff 100%);
+    radial-gradient(1100px 640px at -12% -18%, rgba(225, 29, 138, 0.3), transparent 58%),
+    radial-gradient(920px 560px at 112% -12%, rgba(56, 189, 248, 0.34), transparent 52%),
+    radial-gradient(720px 480px at 78% 108%, rgba(124, 58, 237, 0.2), transparent 52%),
+    linear-gradient(165deg, #cfc9e6 0%, #c5d4ec 42%, #cddcea 100%);
 }
 
 .title-gradient {
@@ -32,6 +33,14 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+}
+
+.surface {
+  background: linear-gradient(180deg, rgba(232, 218, 255, 0.82), rgba(206, 224, 255, 0.9));
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  box-shadow:
+    0 1px 0 rgb(255 255 255 / 0.4) inset,
+    0 14px 36px rgb(76 29 149 / 0.12);
 }
 
 .seg-btn {
@@ -49,11 +58,11 @@ body {
 }
 
 .seg-btn[data-on='false']:hover {
-  background: rgb(255 255 255 / 0.85);
+  background: rgb(255 255 255 / 0.55);
 }
 
 .nav-tab {
-  @apply relative pb-0.5 text-sm font-semibold text-slate-400 transition;
+  @apply relative pb-0.5 text-sm font-semibold text-slate-500 transition;
 }
 
 .nav-tab[data-on='true'] {
@@ -79,15 +88,15 @@ body {
   position: relative;
   overflow: hidden;
   border-radius: 1rem;
-  border: 1px solid rgb(255 255 255 / 0.85);
-  background: rgb(255 255 255 / 0.88);
-  box-shadow: 0 1px 2px rgb(124 58 237 / 0.06);
+  border: 1px solid rgba(124, 58, 237, 0.16);
+  background: linear-gradient(165deg, rgba(255, 216, 240, 0.72) 0%, rgba(214, 202, 255, 0.9) 100%);
+  box-shadow: 0 12px 28px rgb(76 29 149 / 0.12);
 }
 
 .kpi-card::before {
   content: '';
   position: absolute;
   inset: 0 0 auto 0;
-  height: 3px;
+  height: 4px;
   background: linear-gradient(90deg, #e11d8a, #7c3aed, #38bdf8);
 }

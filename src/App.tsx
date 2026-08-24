@@ -252,7 +252,7 @@ export default function App() {
           k12Pgc: latest?.k12Pgc ?? null,
           k12Cc90: latest?.k12Cc90 ?? null,
           superPgc: latest?.totalPgc ?? null,
-          note: noteFor(notes, focusWeek, name),
+          note: noteFor(notes, latest?.week ?? focusWeek, name),
         }
       })
       .filter((item) => !manager || item.manager === manager)
@@ -282,8 +282,8 @@ export default function App() {
     saveFocus(next)
   }
 
-  const onNoteChange = (name: string, text: string) => {
-    const next = setNote(notes, focusWeek, name, text)
+  const onNoteChange = (name: string, week: string, text: string) => {
+    const next = setNote(notes, week, name, text)
     setNotes(next)
     saveNotes(next)
   }
@@ -345,7 +345,7 @@ export default function App() {
         ) : tab === 'focus' ? (
           livePayload.empty ? (
             <div className="mx-auto max-w-6xl px-4 sm:px-6">
-              <div className="rounded-2xl border border-dashed border-sky-200 bg-white/80 px-6 py-12 text-center">
+              <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
                 <p className="text-lg font-semibold text-slate-800">Focus list</p>
                 <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{livePayload.emptyReason}</p>
               </div>
@@ -372,7 +372,7 @@ export default function App() {
           />
         ) : livePayload.empty ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
-            <div className="rounded-2xl border border-dashed border-sky-200 bg-white/80 px-6 py-12 text-center">
+            <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
               <p className="text-lg font-semibold text-slate-800">
                 {SLICE_LOOKER_FILTERS[slice].label}
                 {staffingAllowed(slice) ? ` · ${staffing === 'cross-train' ? 'Cross Train' : 'Primary'}` : ''}
@@ -422,11 +422,14 @@ export default function App() {
         focusWeek={focusWeek}
         wtdAsOf={livePayload?.wtdAsOf ?? null}
         slice={slice}
-        note={selectedRow ? noteFor(notes, focusWeek, selectedRow.name) : ''}
-        noteHistory={selectedRow ? notesForRep(notes, selectedRow.name) : []}
+        notesByWeek={
+          selectedRow
+            ? Object.fromEntries(notesForRep(notes, selectedRow.name).map((n) => [n.week, n.text]))
+            : {}
+        }
         onClose={() => setSelected(null)}
         onToggleFocus={(audience) => selectedRow && onToggleFocus(selectedRow.name, audience)}
-        onNoteChange={(text) => selectedRow && onNoteChange(selectedRow.name, text)}
+        onNoteChange={(week, text) => selectedRow && onNoteChange(selectedRow.name, week, text)}
       />
 
       <SettingsPanel
