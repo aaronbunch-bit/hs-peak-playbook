@@ -74,21 +74,72 @@ export type WeekKpis = {
   n: number
 }
 
-export function weekKpis(rows: RepRow[], focusNames: Set<string>): WeekKpis {
-  const withVol = rows.filter((r) => r.pgc != null && r.cc90 != null && r.cc90 > 0)
+function weightedPgc(rows: { pgc: number | null | undefined; cc90: number | null | undefined }[]): number | null {
+  const withVol = rows.filter((r) => r.pgc != null && r.cc90 != null && (r.cc90 ?? 0) > 0)
+  if (withVol.length > 0) {
+    return (
+      withVol.reduce((sum, r) => sum + (r.pgc ?? 0) * (r.cc90 ?? 0), 0) /
+      withVol.reduce((sum, r) => sum + (r.cc90 ?? 0), 0)
+    )
+  }
   const withPgc = rows.filter((r) => r.pgc != null)
-  const teamPgc =
-    withVol.length > 0
-      ? withVol.reduce((sum, r) => sum + (r.pgc ?? 0) * (r.cc90 ?? 0), 0) /
-        withVol.reduce((sum, r) => sum + (r.cc90 ?? 0), 0)
-      : withPgc.length === 0
-        ? null
-        : withPgc.reduce((sum, r) => sum + (r.pgc ?? 0), 0) / withPgc.length
+  if (withPgc.length === 0) return null
+  return withPgc.reduce((sum, r) => sum + (r.pgc ?? 0), 0) / withPgc.length
+}
+
+export function weekKpis(rows: RepRow[], focusNames: Set<string>): WeekKpis {
   return {
-    teamPgc,
+    teamPgc: weightedPgc(rows.map((r) => ({ pgc: r.pgc, cc90: r.cc90 }))),
     atTarget: rows.filter((r) => r.atTarget).length,
     improving: rows.filter((r) => r.trend === 'up').length,
     slipping: rows.filter((r) => r.trend === 'down').length,
+    focusCount: rows.filter((r) => focusNames.has(r.name)).length,
+    n: rows.length,
+  }
+}
+
+export type WtdKpis = {
+  teamPgc: number | null
+  latestDayPgc: number | null
+  latestDay: string | null
+  atTarget: number
+  improving: number
+  focusCount: number
+  n: number
+}
+
+/** Most recent day in the WTD grid that has any pGC or cc90. */
+export function latestActiveDay(rows: DailyRepRow[]): string | null {
+  const days = rows[0]?.days.map((d) => d.date) ?? []
+  for (let i = days.length - 1; i >= 0; i--) {
+    const hasVol = rows.some((r) => {
+      const day = r.days[i]
+      return day != null && (day.pgc != null || (day.cc90 != null && day.cc90 > 0))
+    })
+    if (hasVol) return days[i]
+  }
+  return days.at(-1) ?? null
+}
+
+export function wtdKpis(rows: RepRow[], dailyRows: DailyRepRow[], focusNames: Set<string>): WtdKpis {
+  const latestDay = latestActiveDay(dailyRows)
+  const latestDayPgc = latestDay
+    ? weightedPgc(
+        dailyRows.map((r) => {
+          const day = r.days.find((d) => d.date === latestDay)
+          return { pgc: day?.pgc, cc90: day?.cc90 }
+        }),
+      )
+    : null
+  return {
+    teamPgc: weightedPgc(rows.map((r) => ({ pgc: r.wtdPgc, cc90: r.wtdCc90 }))),
+    latestDayPgc,
+    latestDay,
+    atTarget: rows.filter((r) => r.wtdAtTarget).length,
+    improving: dailyRows.filter((r) => {
+      const day = latestDay ? r.days.find((d) => d.date === latestDay) : r.days.at(-1)
+      return day?.dod != null && day.dod >= IMPROVE_PTS
+    }).length,
     focusCount: rows.filter((r) => focusNames.has(r.name)).length,
     n: rows.length,
   }

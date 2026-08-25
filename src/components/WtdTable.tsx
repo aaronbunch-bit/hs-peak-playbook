@@ -1,4 +1,5 @@
 import { formatBps, formatPgc, formatWeek, formatWeekday, type DailyRepRow } from '../lib/pacer'
+import type { LcCurves } from '../lib/settings'
 import type { Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
@@ -6,6 +7,8 @@ type Props = {
   rows: DailyRepRow[]
   selected: string | null
   slice: Slice
+  targetPgc: number
+  lcCurves: LcCurves
   onSelect: (name: string) => void
 }
 
@@ -15,7 +18,7 @@ function Dod({ value }: { value: number | null }) {
   return <span className={`text-[10px] tabular-nums ${cls}`}>{formatBps(value)}</span>
 }
 
-export function WtdTable({ rows, selected, slice, onSelect }: Props) {
+export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect }: Props) {
   const days = rows[0]?.days.map((d) => d.date) ?? []
   const sliceLabel = slice === 'hs-stem' ? 'HS-STEM' : slice === 'k12tp' ? 'K12 Test Prep' : 'Supergroup'
 
@@ -66,6 +69,9 @@ export function WtdTable({ rows, selected, slice, onSelect }: Props) {
                           value={day.pgc}
                           atTarget={day.pgc != null && day.pgc >= row.expectedPgc}
                           expected={row.expectedPgc}
+                          level={row.level}
+                          targetPgc={targetPgc}
+                          lcCurves={lcCurves}
                         />
                         <div className="text-[10px] text-slate-400">
                           {day.cc90 == null ? '—' : `${day.cc90.toLocaleString()} cc90`}

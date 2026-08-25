@@ -62,6 +62,45 @@ export function expectedPgc(baseTarget: number, level: string | null | undefined
   return baseTarget * curveForLevel(level, curves)
 }
 
+export function nextLcLevel(level: string | null | undefined): LcLevel | null {
+  if (!isLcLevel(level) || level === 'LC4') return null
+  const i = LC_LEVELS.indexOf(level)
+  return LC_LEVELS[i + 1] ?? null
+}
+
+export type ChipTone = 'empty' | 'below' | 'at' | 'stretch'
+
+/** Highest LC bar this pGC clears, starting at the rep’s own LC. */
+export function highestMetLc(
+  pgc: number | null | undefined,
+  level: string | null | undefined,
+  baseTarget: number,
+  curves: LcCurves,
+): LcLevel | null {
+  if (pgc == null) return null
+  const start = isLcLevel(level) ? LC_LEVELS.indexOf(level) : LC_LEVELS.indexOf('LC4')
+  let met: LcLevel | null = null
+  for (let i = start; i < LC_LEVELS.length; i++) {
+    const lc = LC_LEVELS[i]
+    if (pgc >= expectedPgc(baseTarget, lc, curves)) met = lc
+    else break
+  }
+  return met
+}
+
+export function pgcChipTone(
+  pgc: number | null | undefined,
+  level: string | null | undefined,
+  baseTarget: number,
+  curves: LcCurves,
+): ChipTone {
+  if (pgc == null) return 'empty'
+  const met = highestMetLc(pgc, level, baseTarget, curves)
+  if (met == null) return 'below'
+  if (isLcLevel(level) && level !== 'LC4' && met !== level) return 'stretch'
+  return 'at'
+}
+
 export function audienceLabel(slice: Slice): string {
   if (slice === 'hs-stem') return 'HS'
   if (slice === 'k12tp') return 'K12'

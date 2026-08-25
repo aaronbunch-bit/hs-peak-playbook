@@ -24,7 +24,7 @@ type Props = {
   managers: string[]
   manager: string | null
   weeks: string[]
-  weekIndex: number
+  weekCursor: number
   targets: Targets
   hiddenCount: number
   onTab: (tab: AppTab) => void
@@ -32,7 +32,7 @@ type Props = {
   onCohort: (cohort: Cohort) => void
   onManager: (manager: string | null) => void
   onStaffing: (value: Staffing) => void
-  onWeekIndex: (index: number) => void
+  onWeekCursor: (index: number) => void
   onRestoreHidden: () => void
   onOpenSettings: () => void
   onRefresh: () => void
@@ -59,7 +59,7 @@ export function FilterBar({
   managers,
   manager,
   weeks,
-  weekIndex,
+  weekCursor,
   targets,
   hiddenCount,
   onTab,
@@ -67,17 +67,18 @@ export function FilterBar({
   onCohort,
   onManager,
   onStaffing,
-  onWeekIndex,
+  onWeekCursor,
   onRestoreHidden,
   onOpenSettings,
   onRefresh,
 }: Props) {
   const showStaffing = staffingAllowed(slice)
-  const selectedWeek = weeks[weekIndex]
+  const wtdWeek = weekCursor === 0
+  const closedIndex = wtdWeek ? 0 : Math.max(weekCursor - 1, 0)
+  const selectedWeek = weeks[closedIndex]
+  const oldestCursor = weeks.length
   const activeTarget = targetForSlice(slice, targets)
-  const playbook = tab === 'playbook'
-  const wtd = tab === 'wtd'
-  const metrics = playbook || wtd
+  const playbook = tab === 'playbook' || tab === 'wtd'
   const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'SG'
 
   return (
@@ -92,11 +93,8 @@ export function FilterBar({
               </h1>
             </div>
             <nav className="flex items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">
-              <button type="button" className="nav-tab" data-on={tab === 'playbook'} onClick={() => onTab('playbook')}>
+              <button type="button" className="nav-tab" data-on={tab === 'playbook' || tab === 'wtd'} onClick={() => onTab('playbook')}>
                 Playbook
-              </button>
-              <button type="button" className="nav-tab" data-on={tab === 'wtd'} onClick={() => onTab('wtd')}>
-                WTD
               </button>
               <button type="button" className="nav-tab" data-on={tab === 'focus'} onClick={() => onTab('focus')}>
                 Focus
@@ -124,7 +122,7 @@ export function FilterBar({
           </div>
         </div>
 
-        {metrics && (
+        {playbook && (
           <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
             <Field label="Audience">
               <Seg>
@@ -181,41 +179,48 @@ export function FilterBar({
               </Seg>
             </Field>
 
-            {wtd && (
-              <Field label="This week">
-                <span className="inline-flex h-[30px] items-center text-xs font-semibold text-slate-800">
-                  Sunday → today
-                </span>
-              </Field>
-            )}
-
-            {playbook && (
-            <Field label="Closed week">
-              <div className="flex items-center rounded-lg bg-slate-100/80 p-0.5">
+            <Field label="Week">
+              <div className="flex items-center gap-1">
                 <button
                   type="button"
-                  className="seg-btn px-2 py-1 text-xs"
-                  aria-label="Older week"
-                  disabled={weekIndex >= weeks.length - 1}
-                  onClick={() => onWeekIndex(Math.min(weekIndex + 1, weeks.length - 1))}
+                  className="seg-btn px-2.5 py-1 text-xs"
+                  data-on={wtdWeek}
+                  title="In-progress week · Sunday → today"
+                  onClick={() => onWeekCursor(0)}
                 >
-                  ‹
+                  WTD
                 </button>
-                <span className="min-w-18 px-2 text-center text-xs font-semibold text-slate-800">
-                  {selectedWeek ? formatWeek(selectedWeek) : '—'}
-                </span>
-                <button
-                  type="button"
-                  className="seg-btn px-2 py-1 text-xs"
-                  aria-label="Newer week"
-                  disabled={weekIndex <= 0}
-                  onClick={() => onWeekIndex(Math.max(weekIndex - 1, 0))}
-                >
-                  ›
-                </button>
+                <div className="flex items-center rounded-lg bg-slate-100/80 p-0.5">
+                  <button
+                    type="button"
+                    className="seg-btn px-2 py-1 text-xs"
+                    aria-label="Older week"
+                    disabled={weekCursor >= oldestCursor}
+                    onClick={() => onWeekCursor(wtdWeek ? 1 : Math.min(weekCursor + 1, oldestCursor))}
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    className="min-w-18 px-2 text-center text-xs font-semibold text-slate-800"
+                    data-on={!wtdWeek}
+                    title="Closed Sunday week"
+                    onClick={() => onWeekCursor(wtdWeek ? 1 : weekCursor)}
+                  >
+                    {selectedWeek ? formatWeek(selectedWeek) : '—'}
+                  </button>
+                  <button
+                    type="button"
+                    className="seg-btn px-2 py-1 text-xs"
+                    aria-label="Newer week"
+                    disabled={wtdWeek}
+                    onClick={() => onWeekCursor(weekCursor <= 1 ? 0 : weekCursor - 1)}
+                  >
+                    ›
+                  </button>
+                </div>
               </div>
             </Field>
-            )}
 
             <Field label="Manager">
               <select

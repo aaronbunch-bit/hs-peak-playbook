@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatBps, formatPgc, formatWeek } from '../lib/pacer'
+import type { LcCurves } from '../lib/settings'
 import { FOCUS_SLICES, SLICE_LABELS, SLICE_SHORT } from '../lib/slices'
 import type { FocusLogEntry, RepRow, Slice, WeekPoint } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
@@ -12,6 +13,8 @@ type Props = {
   focusWeek: string
   wtdAsOf: string | null
   slice: Slice
+  targetPgc: number
+  lcCurves: LcCurves
   notesByWeek: Record<string, string>
   onClose: () => void
   onToggleFocus: (slice: Slice) => void
@@ -112,6 +115,8 @@ export function RepDrawer({
   focusWeek,
   wtdAsOf,
   slice,
+  targetPgc,
+  lcCurves,
   notesByWeek,
   onClose,
   onToggleFocus,
@@ -165,7 +170,15 @@ export function RepDrawer({
             <div className="rounded-2xl bg-slate-50 p-3">
               <p className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Last week</p>
               <div className="mt-1">
-                <PgcStatus value={row.pgc} atTarget={row.atTarget} expected={row.expectedPgc} size="lg" />
+                <PgcStatus
+                  value={row.pgc}
+                  atTarget={row.atTarget}
+                  expected={row.expectedPgc}
+                  size="lg"
+                  level={row.level}
+                  targetPgc={targetPgc}
+                  lcCurves={lcCurves}
+                />
               </div>
               <p className="mt-1 text-[11px] text-slate-400">
                 {row.level ?? 'Unknown'} expect {formatPgc(row.expectedPgc)}
@@ -174,7 +187,15 @@ export function RepDrawer({
             <div className="rounded-2xl bg-sky-50 p-3 ring-1 ring-sky-100">
               <p className="text-xs font-semibold tracking-wide text-sky-700 uppercase">WTD</p>
               <div className="mt-1">
-                <PgcStatus value={row.wtdPgc} atTarget={row.wtdAtTarget} expected={row.expectedPgc} size="lg" />
+                <PgcStatus
+                  value={row.wtdPgc}
+                  atTarget={row.wtdAtTarget}
+                  expected={row.expectedPgc}
+                  size="lg"
+                  level={row.level}
+                  targetPgc={targetPgc}
+                  lcCurves={lcCurves}
+                />
               </div>
               <p className="text-[11px] text-slate-400">
                 {row.wtdPgc == null
@@ -274,6 +295,9 @@ export function RepDrawer({
               selected={noteIsCurrent}
               hasNote={Boolean(notesByWeek[focusWeek]?.trim())}
               expectedPgc={row.expectedPgc}
+              level={row.level}
+              targetPgc={targetPgc}
+              lcCurves={lcCurves}
               slice={slice}
               heading="This week"
               subtitle="Sunday → today · editable"
@@ -286,6 +310,9 @@ export function RepDrawer({
                 selected={w.week === noteWeek}
                 hasNote={Boolean(notesByWeek[w.week]?.trim())}
                 expectedPgc={row.expectedPgc}
+                level={row.level}
+                targetPgc={targetPgc}
+                lcCurves={lcCurves}
                 slice={slice}
                 subtitle="View only"
                 onSelect={() => setNoteWeek(w.week)}
@@ -321,6 +348,9 @@ function WeekCard({
   selected,
   hasNote,
   expectedPgc,
+  level,
+  targetPgc,
+  lcCurves,
   slice,
   heading,
   subtitle,
@@ -330,6 +360,9 @@ function WeekCard({
   selected: boolean
   hasNote: boolean
   expectedPgc: number
+  level: string | null
+  targetPgc: number
+  lcCurves: LcCurves
   slice: Slice
   heading?: string
   subtitle?: string
@@ -374,6 +407,9 @@ function WeekCard({
             value={point.pgc}
             atTarget={point.pgc != null && point.pgc >= expectedPgc}
             expected={expectedPgc}
+            level={level}
+            targetPgc={targetPgc}
+            lcCurves={lcCurves}
           />
           <p
             className={`text-xs tabular-nums ${

@@ -19,9 +19,9 @@ import {
   toggleFocus,
 } from './lib/focus'
 import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
-import { readHash, staffingAllowed, writeHash, type AppTab } from './lib/hash'
+import { readHash, staffingAllowed, weekCursorFromHash, writeHash, type AppTab } from './lib/hash'
 import { fetchPacerData, SLICE_LOOKER_FILTERS } from './lib/looker'
-import { buildDailyRows, buildRows, formatWeek, mergeFocusLog, weekKpis } from './lib/pacer'
+import { buildDailyRows, buildRows, formatWeek, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
 import {
   applyRosterLevels,
   loadRosterLevels,
@@ -35,13 +35,13 @@ import type { Cohort, PacerPayload, Slice, Staffing } from './lib/types'
 
 export default function App() {
   const initial = readHash()
-  const [tab, setTab] = useState<AppTab>(initial.tab)
+  const [tab, setTab] = useState<AppTab>(initial.tab === 'wtd' ? 'playbook' : initial.tab)
   const [slice, setSlice] = useState<Slice>(initial.slice)
   const [cohort, setCohort] = useState<Cohort>(initial.cohort)
   const [staffing, setStaffing] = useState<Staffing>(initial.staffing)
   const [manager, setManager] = useState<string | null>(initial.manager)
   const [payload, setPayload] = useState<PacerPayload | null>(null)
-  const [weekIndex, setWeekIndex] = useState(0)
+  const [weekCursor, setWeekCursor] = useState(initial.tab === 'wtd' || initial.week === 'wtd' ? 0 : 1)
   const [compareWow, setCompareWow] = useState(true)
   const [focus, setFocus] = useState(loadFocus)
   const [notes, setNotes] = useState(loadNotes)
@@ -56,7 +56,9 @@ export default function App() {
 
   const focusWeek = sundayWeekStart()
   const targetPgc = targetForSlice(slice, settings.targets)
-  const selectedWeek = payload?.weeks[weekIndex] ?? null
+  const wtdView = tab === 'playbook' && weekCursor === 0
+  const closedWeekIndex = wtdView ? 0 : Math.max(weekCursor - 1, 0)
+  const selectedWeek = payload?.weeks[closedWeekIndex] ?? null
 
   const livePayload = useMemo(() => {
     if (!payload) return null
@@ -79,15 +81,17 @@ export default function App() {
   }, [livePayload])
 
   useEffect(() => {
+    const onPlaybook = tab === 'playbook'
+    const hashTab = onPlaybook && weekCursor === 0 ? 'wtd' : tab
     writeHash({
       slice,
       cohort,
       staffing,
       manager,
-      tab,
-      week: weekIndex > 0 && selectedWeek ? selectedWeek : null,
+      tab: hashTab,
+      week: onPlaybook && weekCursor > 1 && selectedWeek ? selectedWeek : onPlaybook && weekCursor === 0 ? 'wtd' : null,
     })
-  }, [slice, cohort, staffing, manager, tab, weekIndex, selectedWeek])
+  }, [slice, cohort, staffing, manager, tab, weekCursor, selectedWeek])
 
   useEffect(() => {
     const onHash = () => {
@@ -96,18 +100,19 @@ export default function App() {
       setCohort(next.cohort)
       setStaffing(next.staffing)
       setManager(next.manager)
-      setTab(next.tab)
+      setTab(next.tab === 'wtd' ? 'playbook' : next.tab)
+      setWeekCursor(weekCursorFromHash(next.tab, next.week, payload?.weeks ?? []))
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
-  }, [])
+  }, [payload])
 
   useEffect(() => {
     let cancelled = false
     fetchPacerData(slice, staffingAllowed(slice) ? staffing : 'primary').then((data) => {
       if (!cancelled) {
         setPayload(data)
-        setWeekIndex(0)
+        setWeekCursor((c) => (c === 0 ? 0 : 1))
       }
     })
     return () => {
@@ -135,7 +140,7 @@ export default function App() {
     () => new Set(namesForWeek(focus, focusWeek, slice)),
     [focus, focusWeek, slice],
   )
-  const kpiFocusWeek = weekIndex === 0 ? focusWeek : (selectedWeek ?? focusWeek)
+  const kpiFocusWeek = wtdView || weekCursor === 1 ? focusWeek : (selectedWeek ?? focusWeek)
   const thatWeekFocusSet = useMemo(
     () => new Set(namesForWeek(focus, kpiFocusWeek, slice)),
     [focus, kpiFocusWeek, slice],
@@ -148,12 +153,12 @@ export default function App() {
       focusLog: mergeFocusLog(livePayload.focusLog, historyFromStore(focus)),
     }
     const built = buildRows(withHistory, cohort, targetPgc, {
-      weekIndex,
+      weekIndex: closedWeekIndex,
       staffing,
       lcCurves: settings.lcCurves,
     })
     return manager ? built.filter((r) => r.manager === manager) : built
-  }, [livePayload, cohort, focus, targetPgc, weekIndex, staffing, manager, settings.lcCurves])
+  }, [livePayload, cohort, focus, targetPgc, closedWeekIndex, staffing, manager, settings.lcCurves])
 
   const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
 
@@ -175,21 +180,21 @@ export default function App() {
   )
 
   const priorRows = useMemo(() => {
-    if (!livePayload || livePayload.empty || weekIndex + 1 >= livePayload.weeks.length) return []
+    if (!livePayload || livePayload.empty || closedWeekIndex + 1 >= livePayload.weeks.length) return []
     const withHistory = {
       ...livePayload,
       focusLog: mergeFocusLog(livePayload.focusLog, historyFromStore(focus)),
     }
     const built = buildRows(withHistory, cohort, targetPgc, {
-      weekIndex: weekIndex + 1,
+      weekIndex: closedWeekIndex + 1,
       staffing,
       lcCurves: settings.lcCurves,
     })
     const scoped = manager ? built.filter((r) => r.manager === manager) : built
     return scoped.filter((r) => !hiddenSet.has(r.name))
-  }, [livePayload, cohort, focus, targetPgc, weekIndex, staffing, manager, settings.lcCurves, hiddenSet])
+  }, [livePayload, cohort, focus, targetPgc, closedWeekIndex, staffing, manager, settings.lcCurves, hiddenSet])
 
-  const priorWeek = livePayload?.weeks[weekIndex + 1] ?? null
+  const priorWeek = livePayload?.weeks[closedWeekIndex + 1] ?? null
   const priorFocusSet = useMemo(
     () => new Set(priorWeek ? namesForWeek(focus, priorWeek, slice) : []),
     [focus, priorWeek],
@@ -278,13 +283,28 @@ export default function App() {
 
   const selectedRow =
     rows.find((r) => r.name === selected) ?? catalogRows.find((r) => r.name === selected) ?? null
-  const currentKpis = weekKpis(visibleRows, thatWeekFocusSet)
-  const priorKpis = priorRows.length ? weekKpis(priorRows, priorFocusSet) : null
-  const wtdTeam = (() => {
-    const withWtd = visibleRows.filter((r) => r.wtdPgc != null)
-    if (weekIndex !== 0 || withWtd.length === 0) return null
-    return withWtd.reduce((sum, r) => sum + (r.wtdPgc ?? 0), 0) / withWtd.length
-  })()
+  const closedKpis = weekKpis(visibleRows, thatWeekFocusSet)
+  const lastClosedFocusSet = useMemo(
+    () => new Set(selectedWeek ? namesForWeek(focus, selectedWeek, slice) : []),
+    [focus, selectedWeek, slice],
+  )
+  const priorKpis = wtdView
+    ? weekKpis(visibleRows, lastClosedFocusSet)
+    : priorRows.length
+      ? weekKpis(priorRows, priorFocusSet)
+      : null
+  const wtdSummary = wtdKpis(visibleRows, dailyRows, focusedSet)
+  const currentKpis = wtdView
+    ? {
+        teamPgc: wtdSummary.teamPgc,
+        atTarget: wtdSummary.atTarget,
+        improving: wtdSummary.improving,
+        slipping: 0,
+        focusCount: wtdSummary.focusCount,
+        n: wtdSummary.n,
+      }
+    : closedKpis
+  const wtdTeam = weekCursor === 1 ? wtdSummary.teamPgc : null
 
   const onSort = (key: SortKey) => {
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -341,18 +361,23 @@ export default function App() {
         managers={managers}
         manager={manager}
         weeks={livePayload?.weeks ?? []}
-        weekIndex={weekIndex}
+        weekCursor={weekCursor}
         targets={settings.targets}
         hiddenCount={hiddenReps.length}
         onTab={(next) => {
-          setTab(next)
+          setTab(next === 'wtd' ? 'playbook' : next)
+          if (next === 'wtd') setWeekCursor(0)
           setSelected(null)
         }}
         onSlice={changeSlice}
         onCohort={setCohort}
         onManager={setManager}
         onStaffing={setStaffing}
-        onWeekIndex={setWeekIndex}
+        onWeekCursor={(next) => {
+          setWeekCursor(next)
+          setTab('playbook')
+          setSelected(null)
+        }}
         onRestoreHidden={onRestoreHidden}
         onOpenSettings={() => setSettingsOpen(true)}
         onRefresh={() => setReload((n) => n + 1)}
@@ -389,17 +414,6 @@ export default function App() {
             onHide={onHideRep}
             onShow={onShowRep}
           />
-        ) : tab === 'wtd' ? (
-          livePayload.empty ? (
-            <div className="mx-auto max-w-6xl px-4 sm:px-6">
-              <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
-                <p className="text-lg font-semibold text-slate-800">WTD · day over day</p>
-                <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{livePayload.emptyReason}</p>
-              </div>
-            </div>
-          ) : (
-            <WtdTable rows={dailyRows} selected={selected} slice={slice} onSelect={setSelected} />
-          )
         ) : livePayload.empty ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
@@ -410,6 +424,31 @@ export default function App() {
               <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{livePayload.emptyReason}</p>
             </div>
           </div>
+        ) : wtdView ? (
+          <>
+            <KpiStrip
+              mode="wtd"
+              current={currentKpis}
+              prior={priorKpis}
+              compareWow={compareWow}
+              targetPgc={targetPgc}
+              wtdPgc={wtdSummary.teamPgc}
+              wtdReady={visibleRows.some((r) => r.wtdPgc != null)}
+              suggestedCount={suggestions.length}
+              selectedWeekLabel="WTD"
+              latestDayPgc={wtdSummary.latestDayPgc}
+              latestDay={wtdSummary.latestDay}
+              onCompareWow={setCompareWow}
+            />
+            <WtdTable
+              rows={dailyRows}
+              selected={selected}
+              slice={slice}
+              targetPgc={targetPgc}
+              lcCurves={settings.lcCurves}
+              onSelect={setSelected}
+            />
+          </>
         ) : (
           <>
             <KpiStrip
@@ -418,7 +457,7 @@ export default function App() {
               compareWow={compareWow}
               targetPgc={targetPgc}
               wtdPgc={wtdTeam}
-              wtdReady={weekIndex === 0 && visibleRows.some((r) => r.wtdPgc != null)}
+              wtdReady={weekCursor === 1 && visibleRows.some((r) => r.wtdPgc != null)}
               suggestedCount={suggestions.length}
               selectedWeekLabel={selectedWeek ? formatWeek(selectedWeek) : '—'}
               onCompareWow={setCompareWow}
@@ -434,6 +473,7 @@ export default function App() {
               sortKey={sortKey}
               sortDir={sortDir}
               targetPgc={targetPgc}
+              lcCurves={settings.lcCurves}
               slice={slice}
               onSort={onSort}
               onSelect={setSelected}
@@ -452,6 +492,8 @@ export default function App() {
         focusWeek={focusWeek}
         wtdAsOf={livePayload?.wtdAsOf ?? null}
         slice={slice}
+        targetPgc={targetPgc}
+        lcCurves={settings.lcCurves}
         notesByWeek={
           selectedRow
             ? Object.fromEntries(notesForRep(notes, selectedRow.name).map((n) => [n.week, n.text]))

@@ -23,7 +23,7 @@ The clone filters Looker **Rep Name** to the High School Peak list and does **no
 
 There is no Overall. Total pGC is Supergroup.
 
-The **WTD** tab is day grain: Call Created At Date = this Sunday → today, same audience pivot, same High School work-group filter, plus dashboard 7699 defaults (Business = International, VT Core; Expert Type ≠ Dropped Expert; Consultant cc90 = Yes). DoD is that day’s pGC minus the prior calendar day.
+The **WTD** week on the Playbook pager is day grain: Call Created At Date = this Sunday → today, same audience pivot, plus dashboard 7699 defaults (Business = International, VT Core; Expert Type ≠ Dropped Expert; Consultant cc90 = Yes). DoD is that day’s pGC minus the prior calendar day. Team blocks on WTD are WTD pGC, latest-day pGC, at target, improving DoD, and focus.
 
 Team KPIs use CC90-weighted pGC so they match Looker rollups.
 

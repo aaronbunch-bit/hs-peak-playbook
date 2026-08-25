@@ -1,6 +1,7 @@
-import { formatBps, formatPgc, IMPROVE_PTS, type WeekKpis } from '../lib/pacer'
+import { formatBps, formatPgc, formatWeek, formatWeekday, IMPROVE_PTS, type WeekKpis } from '../lib/pacer'
 
 type Props = {
+  mode?: 'week' | 'wtd'
   current: WeekKpis
   prior: WeekKpis | null
   compareWow: boolean
@@ -9,6 +10,8 @@ type Props = {
   wtdReady: boolean
   suggestedCount: number
   selectedWeekLabel: string
+  latestDayPgc?: number | null
+  latestDay?: string | null
   onCompareWow: (value: boolean) => void
 }
 
@@ -29,7 +32,13 @@ function DeltaHint({
   return <span className={cls}>vs last wk {label}</span>
 }
 
+function latestDayLabel(iso: string | null | undefined): string {
+  if (!iso) return 'Latest day'
+  return `${formatWeekday(iso)} ${formatWeek(iso)}`
+}
+
 export function KpiStrip({
+  mode = 'week',
   current,
   prior,
   compareWow,
@@ -38,56 +47,104 @@ export function KpiStrip({
   wtdReady,
   suggestedCount,
   selectedWeekLabel,
+  latestDayPgc,
+  latestDay,
   onCompareWow,
 }: Props) {
-  const cards = [
-    {
-      label: 'Team pGC',
-      tone: 'magenta',
-      value: formatPgc(current.teamPgc),
-      hint: compareWow ? (
-        <DeltaHint current={current.teamPgc} prior={prior?.teamPgc ?? null} kind="pgc" />
-      ) : (
-        `CC90-weighted · LC4 ${formatPgc(targetPgc)} · ${selectedWeekLabel}`
-      ),
-    },
-    {
-      label: 'WTD pGC',
-      tone: 'sky',
-      value: formatPgc(wtdPgc),
-      hint: wtdReady ? 'this Sunday → today' : 'awaiting Looker',
-    },
-    {
-      label: 'At target',
-      tone: 'emerald',
-      value: String(current.atTarget),
-      hint: compareWow ? (
-        <DeltaHint current={current.atTarget} prior={prior?.atTarget ?? null} kind="count" />
-      ) : (
-        `of ${current.n} shown`
-      ),
-    },
-    {
-      label: 'Improving',
-      tone: 'amber',
-      value: String(current.improving),
-      hint: compareWow ? (
-        <DeltaHint current={current.improving} prior={prior?.improving ?? null} kind="count" />
-      ) : (
-        `Δ WoW ≥ ${formatBps(IMPROVE_PTS)}`
-      ),
-    },
-    {
-      label: 'Focus that week',
-      tone: 'violet',
-      value: String(current.focusCount),
-      hint: compareWow ? (
-        <DeltaHint current={current.focusCount} prior={prior?.focusCount ?? null} kind="count" />
-      ) : (
-        `${suggestedCount} suggested now`
-      ),
-    },
-  ]
+  const wtd = mode === 'wtd'
+  const cards = wtd
+    ? [
+        {
+          label: 'WTD pGC',
+          tone: 'magenta',
+          value: formatPgc(current.teamPgc),
+          hint: compareWow ? (
+            <DeltaHint current={current.teamPgc} prior={prior?.teamPgc ?? null} kind="pgc" />
+          ) : (
+            `CC90-weighted · Sunday → today`
+          ),
+        },
+        {
+          label: latestDay ? `${formatWeekday(latestDay)} pGC` : 'Latest day',
+          tone: 'sky',
+          value: formatPgc(latestDayPgc ?? null),
+          hint: latestDay ? latestDayLabel(latestDay) : 'no volume yet this week',
+        },
+        {
+          label: 'At target',
+          tone: 'emerald',
+          value: String(current.atTarget),
+          hint: compareWow ? (
+            <DeltaHint current={current.atTarget} prior={prior?.atTarget ?? null} kind="count" />
+          ) : (
+            `WTD vs LC expect · ${current.n} shown`
+          ),
+        },
+        {
+          label: 'Improving DoD',
+          tone: 'amber',
+          value: String(current.improving),
+          hint: `Δ DoD ≥ ${formatBps(IMPROVE_PTS)} · ${latestDay ? formatWeekday(latestDay) : 'latest day'}`,
+        },
+        {
+          label: 'Focus this week',
+          tone: 'violet',
+          value: String(current.focusCount),
+          hint: compareWow ? (
+            <DeltaHint current={current.focusCount} prior={prior?.focusCount ?? null} kind="count" />
+          ) : (
+            `${suggestedCount} suggested now`
+          ),
+        },
+      ]
+    : [
+        {
+          label: 'Team pGC',
+          tone: 'magenta',
+          value: formatPgc(current.teamPgc),
+          hint: compareWow ? (
+            <DeltaHint current={current.teamPgc} prior={prior?.teamPgc ?? null} kind="pgc" />
+          ) : (
+            `CC90-weighted · LC4 ${formatPgc(targetPgc)} · ${selectedWeekLabel}`
+          ),
+        },
+        {
+          label: 'WTD pGC',
+          tone: 'sky',
+          value: formatPgc(wtdPgc),
+          hint: wtdReady ? 'this Sunday → today' : 'awaiting Looker',
+        },
+        {
+          label: 'At target',
+          tone: 'emerald',
+          value: String(current.atTarget),
+          hint: compareWow ? (
+            <DeltaHint current={current.atTarget} prior={prior?.atTarget ?? null} kind="count" />
+          ) : (
+            `of ${current.n} shown`
+          ),
+        },
+        {
+          label: 'Improving',
+          tone: 'amber',
+          value: String(current.improving),
+          hint: compareWow ? (
+            <DeltaHint current={current.improving} prior={prior?.improving ?? null} kind="count" />
+          ) : (
+            `Δ WoW ≥ ${formatBps(IMPROVE_PTS)}`
+          ),
+        },
+        {
+          label: 'Focus that week',
+          tone: 'violet',
+          value: String(current.focusCount),
+          hint: compareWow ? (
+            <DeltaHint current={current.focusCount} prior={prior?.focusCount ?? null} kind="count" />
+          ) : (
+            `${suggestedCount} suggested now`
+          ),
+        },
+      ]
 
   return (
     <section className="mx-auto max-w-6xl px-4 sm:px-6">
@@ -99,7 +156,7 @@ export function KpiStrip({
           data-on={compareWow}
           onClick={() => onCompareWow(!compareWow)}
         >
-          {compareWow ? 'Comparing WoW' : 'Compare WoW'}
+          {compareWow ? (wtd ? 'Comparing vs last wk' : 'Comparing WoW') : wtd ? 'Compare vs last wk' : 'Compare WoW'}
         </button>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">

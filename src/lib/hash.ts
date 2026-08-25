@@ -76,3 +76,13 @@ export function writeHash(state: HashState): void {
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}${next}`)
   }
 }
+
+/** 0 = in-progress WTD week. 1 = newest closed week. */
+export function weekCursorFromHash(tab: AppTab, week: string | null, weeks: string[]): number {
+  if (tab === 'wtd' || week === 'wtd') return 0
+  if (week && weeks.length) {
+    const i = weeks.indexOf(week)
+    if (i >= 0) return i + 1
+  }
+  return 1
+}
