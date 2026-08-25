@@ -6,6 +6,7 @@ import { RepDrawer } from './components/RepDrawer'
 import { RepTable, type SortKey } from './components/RepTable'
 import { RosterPage } from './components/RosterPage'
 import { SettingsPanel } from './components/SettingsPanel'
+import { WtdTable } from './components/WtdTable'
 import { sundayWeekStart } from './lib/calendar'
 import {
   focusedThisWeek,
@@ -20,7 +21,7 @@ import {
 import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
 import { readHash, staffingAllowed, writeHash, type AppTab } from './lib/hash'
 import { fetchPacerData, SLICE_LOOKER_FILTERS } from './lib/looker'
-import { buildRows, formatWeek, mergeFocusLog, weekKpis } from './lib/pacer'
+import { buildDailyRows, buildRows, formatWeek, mergeFocusLog, weekKpis } from './lib/pacer'
 import {
   applyRosterLevels,
   loadRosterLevels,
@@ -59,7 +60,15 @@ export default function App() {
 
   const livePayload = useMemo(() => {
     if (!payload) return null
-    return { ...payload, roster: applyRosterLevels(payload.roster, rosterLevels) }
+    return {
+      ...payload,
+      roster: applyRosterLevels(payload.roster, rosterLevels).map((r) => ({
+        ...r,
+        workGroup: r.workGroup ?? 'High School',
+      })),
+      daily: payload.daily ?? [],
+      dailyDays: payload.dailyDays ?? [],
+    }
   }, [payload, rosterLevels])
 
   const managers = useMemo(() => {
@@ -147,6 +156,18 @@ export default function App() {
   }, [livePayload, cohort, focus, targetPgc, weekIndex, staffing, manager, settings.lcCurves])
 
   const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
+
+  const dailyRows = useMemo(() => {
+    if (!livePayload || livePayload.empty) return []
+    const built = buildDailyRows(livePayload, cohort, targetPgc, {
+      staffing,
+      lcCurves: settings.lcCurves,
+    })
+    const scoped = manager ? built.filter((r) => r.manager === manager) : built
+    return scoped
+      .filter((r) => !hiddenSet.has(r.name))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [livePayload, cohort, targetPgc, staffing, manager, settings.lcCurves, hiddenSet])
 
   const visibleRows = useMemo(
     () => allRows.filter((r) => !hiddenSet.has(r.name)),
@@ -368,6 +389,17 @@ export default function App() {
             onHide={onHideRep}
             onShow={onShowRep}
           />
+        ) : tab === 'wtd' ? (
+          livePayload.empty ? (
+            <div className="mx-auto max-w-6xl px-4 sm:px-6">
+              <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
+                <p className="text-lg font-semibold text-slate-800">WTD · day over day</p>
+                <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{livePayload.emptyReason}</p>
+              </div>
+            </div>
+          ) : (
+            <WtdTable rows={dailyRows} selected={selected} slice={slice} onSelect={setSelected} />
+          )
         ) : livePayload.empty ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">

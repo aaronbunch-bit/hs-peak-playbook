@@ -27,3 +27,12 @@ export function addDays(iso: string, days: number): string {
 export function previousSunday(iso: string): string {
   return addDays(iso, -7)
 }
+
+/** Inclusive Sunday → today (ISO dates) for the in-progress week. */
+export function daysSundayThroughToday(d = new Date()): string[] {
+  const start = sundayWeekStart(d)
+  const today = toIsoDate(d)
+  const out: string[] = []
+  for (let iso = start; iso <= today; iso = addDays(iso, 1)) out.push(iso)
+  return out
+}

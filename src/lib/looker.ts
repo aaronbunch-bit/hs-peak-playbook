@@ -1,5 +1,6 @@
+import { HIGH_SCHOOL_WORK_GROUP, isHighSchoolName } from '../data/highSchoolWorkGroup'
 import { getSiteAccessToken } from './auth'
-import { sundayWeekStart, toIsoDate } from './calendar'
+import { daysSundayThroughToday, sundayWeekStart, toIsoDate } from './calendar'
 import { factHasSlice, factToWeekly } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import type { PacerPayload, Slice, Staffing } from './types'
@@ -19,7 +20,7 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
     }
     if (res.ok) {
       const data = (await res.json()) as PacerPayload
-      if (data.weekly?.length || data.empty) return data
+      if (data.weekly?.length || data.daily?.length || data.empty) return data
     }
   } catch {
     // Local Vite uses the seed if the Looker proxy is not running.
@@ -37,9 +38,10 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
   }
 
   const { seed } = await import('../data/seed')
-  const weekly = seed.facts.map((f) => factToWeekly(f, slice)).filter((row) => row != null)
+  const facts = seed.facts.filter((f) => isHighSchoolName(f.name))
+  const weekly = facts.map((f) => factToWeekly(f, slice)).filter((row) => row != null)
   const names = new Set(weekly.map((w) => w.rep))
-  const weeks = [...new Set(seed.facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : -1))
+  const weeks = [...new Set(facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : -1))
   if (weekly.length === 0) {
     return emptyPayload(slice, `No rows for ${SLICE_LOOKER_FILTERS[slice].label} in the Looker extract.`)
   }
@@ -51,9 +53,13 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
     improvePts: seed.improvePts,
     degradePts: seed.degradePts,
     weeks,
-    roster: seed.roster.filter((r) => names.has(r.name)),
+    roster: seed.roster
+      .filter((r) => names.has(r.name))
+      .map((r) => ({ ...r, workGroup: HIGH_SCHOOL_WORK_GROUP })),
     weekly,
     wtd: [],
+    daily: [],
+    dailyDays: daysSundayThroughToday(),
     wtdWeek: sundayWeekStart(),
     wtdAsOf: toIsoDate(new Date()),
     focusLog: seed.focusLog,

@@ -15,7 +15,9 @@ import type { LookerFact, Slice, WeeklyRow } from './types'
  * for that person-week. That is Supergroup pGC — there is no separate
  * Overall.
  *
- * WTD uses the same look with Call Created At Date = this Sunday → now.
+ * WTD rollup uses the same look with Call Created At Date = this Sunday → now.
+ * WTD DoD swaps the week dimension for Call Created At Date (one row per day)
+ * and filters Work Group = High School.
  */
 
 export const LOOKER_PLAYBOOK_FIELDS = [

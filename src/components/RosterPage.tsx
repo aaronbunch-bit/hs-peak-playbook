@@ -39,8 +39,8 @@ export function RosterPage({
         <div>
           <h2 className="text-lg font-semibold text-slate-900">Roster</h2>
           <p className="text-sm text-slate-500">
-            Set Learning Curve for anyone on the Peak Playbook look. Expectations are that LC’s share of the HS, K12,
-            and Super bars. Unknown uses the LC4 bar.
+            Set Learning Curve for anyone on the High School work group. Expectations are that LC’s share of the HS, K12,
+            and Super bars. Unknown uses the LC4 bar. Sales Training and other work groups are not on this roster.
           </p>
         </div>
         <p className="text-xs font-medium text-slate-500">
@@ -57,6 +57,9 @@ export function RosterPage({
                   Rep
                 </th>
                 <th className="px-3 py-3 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">Manager</th>
+                <th className="px-3 py-3 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
+                  Work group
+                </th>
                 <th className="px-3 py-3 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
                   Learning Curve
                 </th>
@@ -82,6 +85,7 @@ export function RosterPage({
                 >
                   <td className="px-4 py-2.5 font-medium text-slate-900 sm:px-5">{row.name}</td>
                   <td className="px-3 py-2.5 text-slate-600">{row.manager ?? '—'}</td>
+                  <td className="px-3 py-2.5 text-slate-600">{row.workGroup ?? 'High School'}</td>
                   <td className="px-3 py-2.5">
                     <select
                       aria-label={`Learning Curve for ${row.name}`}
@@ -133,7 +137,7 @@ export function RosterPage({
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-slate-500">
+                  <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
                     No reps in this view.
                   </td>
                 </tr>

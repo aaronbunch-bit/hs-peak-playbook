@@ -19,7 +19,11 @@ One row per **Consultant** per **Sunday week**, pivoted by **Audience**:
 | K12 Test Prep CC90 / pGC / CC90 Mix | K12TP |
 | **Total pGC** | **Supergroup** (volume-weighted HS + K12) |
 
+The clone also filters Looker **Work Group = High School** (dashboard 7699’s Work Group field). K12 Test Prep is an Audience, not a work group.
+
 There is no Overall. Total pGC is Supergroup.
+
+The **WTD** tab is day grain: Call Created At Date = this Sunday → today, same audience pivot, same High School work-group filter, plus dashboard 7699 defaults (Business = International, VT Core; Expert Type ≠ Dropped Expert; Consultant cc90 = Yes). DoD is that day’s pGC minus the prior calendar day.
 
 Team KPIs use CC90-weighted pGC so they match Looker rollups.
 

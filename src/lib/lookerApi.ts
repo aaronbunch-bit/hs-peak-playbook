@@ -1,10 +1,21 @@
-import { sundayWeekStart, toIsoDate } from './calendar'
+import { daysSundayThroughToday, sundayWeekStart, toIsoDate } from './calendar'
+import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
-import type { LookerFact, PacerPayload, Slice, Staffing } from './types'
+import type { DailyRow, LookerFact, PacerPayload, Slice, Staffing } from './types'
 
 const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
+const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
+const DATE_FIELD = 'call_data_with_coselling.call_created_at_date'
+const WORK_GROUP_FIELD = 'call_data_with_coselling.work_group'
+
+/** Dashboard 7699 defaults that the DoD clone should match. */
+const DASHBOARD_7699_FILTERS: Record<string, string> = {
+  'call_data_with_coselling.business': 'International,VT Core',
+  'call_data_with_coselling.expert_type': '-Dropped Expert',
+  'call_data_with_coselling.consultant_cc90': 'Yes',
+}
 
 type LookerQuery = {
   model?: string
@@ -78,25 +89,43 @@ async function lookQuery(token: string): Promise<LookerQuery> {
   return look.query
 }
 
-async function runQueryCsv(token: string, query: LookerQuery, timeFilter: string): Promise<string> {
+async function runQueryCsv(
+  token: string,
+  query: LookerQuery,
+  timeFilter: string,
+  extra?: { fields?: string[]; filters?: Record<string, string>; sorts?: string[] },
+): Promise<string> {
   const res = await lookerFetch(token, '/queries/run/csv', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(queryBody(query, timeFilter)),
+    body: JSON.stringify(queryBody(query, timeFilter, extra)),
   })
   if (!res.ok) throw new Error(`Looker query failed (${res.status})`)
   return res.text()
 }
 
-function queryBody(query: LookerQuery, timeFilter: string): Record<string, unknown> {
-  const filters = { ...(query.filters ?? {}), [LOOKER_TIME_FILTER]: timeFilter }
+function workGroupValue(): string {
+  return env('LOOKER_WORK_GROUP') || HIGH_SCHOOL_WORK_GROUP
+}
+
+function queryBody(
+  query: LookerQuery,
+  timeFilter: string,
+  extra?: { fields?: string[]; filters?: Record<string, string>; sorts?: string[] },
+): Record<string, unknown> {
+  const filters = {
+    ...(query.filters ?? {}),
+    [LOOKER_TIME_FILTER]: timeFilter,
+    [WORK_GROUP_FIELD]: workGroupValue(),
+    ...(extra?.filters ?? {}),
+  }
   return {
     model: query.model,
     view: query.view,
-    fields: query.fields,
+    fields: extra?.fields ?? query.fields,
     pivots: query.pivots,
     filters,
-    sorts: query.sorts,
+    sorts: extra?.sorts ?? query.sorts,
     limit: query.limit ?? '5000',
     dynamic_fields: query.dynamic_fields,
     query_timezone: query.query_timezone,
@@ -104,11 +133,15 @@ function queryBody(query: LookerQuery, timeFilter: string): Record<string, unkno
   }
 }
 
-async function runClosedWeeks(token: string, query: LookerQuery): Promise<string> {
+function dailyFields(query: LookerQuery): string[] {
+  return (query.fields ?? []).map((field) => (field === WEEK_FIELD ? DATE_FIELD : field))
+}
+
+async function runClosedWeeks(token: string, query: LookerQuery): Promise<{ csv: string; savedLook: boolean }> {
   try {
-    return await runQueryCsv(token, query, CLOSED_WEEKS_FILTER)
+    return { csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER), savedLook: false }
   } catch {
-    return runSavedLook(token)
+    return { csv: await runSavedLook(token), savedLook: true }
   }
 }
 
@@ -116,6 +149,26 @@ async function runWtd(token: string, query: LookerQuery): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
   return runQueryCsv(token, query, `${sunday} to ${today}`)
+}
+
+async function runDod(token: string, query: LookerQuery): Promise<string> {
+  const today = toIsoDate(new Date())
+  const sunday = sundayWeekStart()
+  return runQueryCsv(token, query, `${sunday} to ${today}`, {
+    fields: dailyFields(query),
+    filters: DASHBOARD_7699_FILTERS,
+    sorts: [`${DATE_FIELD} desc`, 'call_data_with_coselling.mgr_name'],
+  })
+}
+
+function restrictToHighSchool(facts: LookerFact[]): LookerFact[] {
+  const out: LookerFact[] = []
+  for (const fact of facts) {
+    const name = canonicalHighSchoolName(fact.name)
+    if (!name) continue
+    out.push(name === fact.name ? fact : { ...fact, name })
+  }
+  return out
 }
 
 function rosterFromFacts(facts: LookerFact[]) {
@@ -128,8 +181,21 @@ function rosterFromFacts(facts: LookerFact[]) {
       name,
       level: prior?.level ?? null,
       manager: sample?.manager ?? prior?.manager ?? null,
+      workGroup: HIGH_SCHOOL_WORK_GROUP,
     }
   })
+}
+
+function dailyFromFacts(facts: LookerFact[], slice: Slice): DailyRow[] {
+  return facts
+    .map((f) => factToWeekly(f, slice))
+    .filter((row) => row != null)
+    .map((row) => ({
+      date: row.week,
+      rep: row.rep,
+      pgc: row.pgc,
+      cc90: row.cc90,
+    }))
 }
 
 export function payloadFromFacts(
@@ -137,10 +203,15 @@ export function payloadFromFacts(
   facts: LookerFact[],
   wtdFacts: LookerFact[],
   source: string,
+  dailyFacts: LookerFact[] = [],
 ): PacerPayload {
   const weekly = facts.map((f) => factToWeekly(f, slice)).filter((row) => row != null)
-  const names = new Set(weekly.map((w) => w.rep))
-  const weeks = [...new Set(facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : -1))
+  const names = new Set([
+    ...weekly.map((w) => w.rep),
+    ...dailyFacts.map((f) => f.name),
+    ...wtdFacts.map((f) => f.name),
+  ])
+  const weeks = [...new Set(facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
   const wtdWeek = sundayWeekStart()
   const wtd = wtdFacts
     .map((f) => factToWeekly(f, slice))
@@ -152,6 +223,7 @@ export function payloadFromFacts(
       pgc: row.pgc,
       cc90: row.cc90,
     }))
+  const rosterFacts = [...facts, ...dailyFacts, ...wtdFacts]
   return {
     source,
     slice,
@@ -160,9 +232,11 @@ export function payloadFromFacts(
     improvePts: seed.improvePts,
     degradePts: seed.degradePts,
     weeks,
-    roster: rosterFromFacts(facts).filter((r) => names.has(r.name)),
+    roster: rosterFromFacts(rosterFacts).filter((r) => names.has(r.name)),
     weekly,
     wtd,
+    daily: dailyFromFacts(dailyFacts, slice),
+    dailyDays: daysSundayThroughToday(),
     wtdWeek,
     wtdAsOf: toIsoDate(new Date()),
     focusLog: seed.focusLog,
@@ -182,14 +256,16 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
 
   const token = await login()
   const query = await lookQuery(token)
-  const [closedCsv, wtdCsv] = await Promise.all([
+  const [closed, wtdCsv, dodCsv] = await Promise.all([
     runClosedWeeks(token, query),
     runWtd(token, query).catch(() => ''),
+    runDod(token, query).catch(() => ''),
   ])
-  const facts = parseLookerPlaybook(closedCsv)
-  const wtdFacts = wtdCsv ? parseLookerPlaybook(wtdCsv) : []
-  const payload = payloadFromFacts(slice, facts, wtdFacts, `Looker look ${lookId()}`)
-  if (payload.weekly.length === 0) {
+  const facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
+  const wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
+  const dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
+  const payload = payloadFromFacts(slice, facts, wtdFacts, `Looker look ${lookId()} · Work Group ${workGroupValue()}`, dailyFacts)
+  if (payload.weekly.length === 0 && payload.daily.length === 0) {
     return emptyPayload(slice, `No rows for ${SLICE_LOOKER_FILTERS[slice].label} from Looker look ${lookId()}.`)
   }
   return payload

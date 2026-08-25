@@ -13,6 +13,7 @@ export type RosterEntry = {
   name: string
   level: string | null
   manager: string | null
+  workGroup?: string | null
   staffing?: Staffing | null
   lookerRepId?: number | null
 }
@@ -55,6 +56,14 @@ export type WtdRow = {
   cc90: number | null
 }
 
+/** One consultant × calendar day for the in-progress week. */
+export type DailyRow = {
+  date: string
+  rep: string
+  pgc: number | null
+  cc90: number | null
+}
+
 export type FocusLogEntry = {
   week: string
   rep: string
@@ -85,6 +94,8 @@ export type PacerPayload = {
   roster: RosterEntry[]
   weekly: WeeklyRow[]
   wtd: WtdRow[]
+  daily: DailyRow[]
+  dailyDays: string[]
   wtdWeek: string | null
   wtdAsOf: string | null
   focusLog: FocusLogEntry[]

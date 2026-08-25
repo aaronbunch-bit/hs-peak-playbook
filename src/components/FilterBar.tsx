@@ -76,6 +76,8 @@ export function FilterBar({
   const selectedWeek = weeks[weekIndex]
   const activeTarget = targetForSlice(slice, targets)
   const playbook = tab === 'playbook'
+  const wtd = tab === 'wtd'
+  const metrics = playbook || wtd
   const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'SG'
 
   return (
@@ -92,6 +94,9 @@ export function FilterBar({
             <nav className="flex items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">
               <button type="button" className="nav-tab" data-on={tab === 'playbook'} onClick={() => onTab('playbook')}>
                 Playbook
+              </button>
+              <button type="button" className="nav-tab" data-on={tab === 'wtd'} onClick={() => onTab('wtd')}>
+                WTD
               </button>
               <button type="button" className="nav-tab" data-on={tab === 'focus'} onClick={() => onTab('focus')}>
                 Focus
@@ -119,7 +124,7 @@ export function FilterBar({
           </div>
         </div>
 
-        {playbook && (
+        {metrics && (
           <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
             <Field label="Audience">
               <Seg>
@@ -176,6 +181,15 @@ export function FilterBar({
               </Seg>
             </Field>
 
+            {wtd && (
+              <Field label="This week">
+                <span className="inline-flex h-[30px] items-center text-xs font-semibold text-slate-800">
+                  Sunday → today
+                </span>
+              </Field>
+            )}
+
+            {playbook && (
             <Field label="Closed week">
               <div className="flex items-center rounded-lg bg-slate-100/80 p-0.5">
                 <button
@@ -201,6 +215,7 @@ export function FilterBar({
                 </button>
               </div>
             </Field>
+            )}
 
             <Field label="Manager">
               <select

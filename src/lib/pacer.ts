@@ -1,6 +1,8 @@
+import { daysSundayThroughToday } from './calendar'
 import { expectedPgc, type LcCurves } from './settings'
 import type {
   Cohort,
+  DailyRow,
   FocusLogEntry,
   PacerPayload,
   RepRow,
@@ -138,6 +140,64 @@ export function buildRows(
     .filter((row) => row.pgc != null || (row.cc90 != null && row.cc90 > 0))
 }
 
+export type DailyPoint = {
+  date: string
+  pgc: number | null
+  cc90: number | null
+  dod: number | null
+}
+
+export type DailyRepRow = {
+  name: string
+  manager: string | null
+  level: string | null
+  expectedPgc: number
+  days: DailyPoint[]
+}
+
+export function buildDailyRows(
+  payload: PacerPayload,
+  cohort: Cohort,
+  targetPgc: number,
+  options: { staffing?: Staffing; lcCurves: LcCurves },
+): DailyRepRow[] {
+  const days = payload.dailyDays?.length ? payload.dailyDays : daysSundayThroughToday()
+  const daily = payload.daily ?? []
+  const byRep = new Map<string, DailyRow[]>()
+  for (const row of daily) {
+    const list = byRep.get(row.rep) ?? []
+    list.push(row)
+    byRep.set(row.rep, list)
+  }
+  const staffing = options.staffing ?? 'primary'
+  const curves = options.lcCurves
+  return payload.roster
+    .filter((r) => inCohort(r.level, cohort))
+    .filter((r) => staffingOf(r) === staffing)
+    .map((r) => {
+      const rows = byRep.get(r.name) ?? []
+      const byDate = new Map(rows.map((row) => [row.date, row]))
+      const series: DailyPoint[] = days.map((date, i) => {
+        const row = byDate.get(date)
+        const prev = i > 0 ? byDate.get(days[i - 1]) : undefined
+        return {
+          date,
+          pgc: row?.pgc ?? null,
+          cc90: row?.cc90 ?? null,
+          dod: weekOverWeek(row?.pgc, prev?.pgc),
+        }
+      })
+      return {
+        name: r.name,
+        manager: r.manager,
+        level: r.level,
+        expectedPgc: expectedPgc(targetPgc, r.level, curves),
+        days: series,
+      }
+    })
+    .filter((row) => row.days.some((d) => d.pgc != null || (d.cc90 != null && d.cc90 > 0)))
+}
+
 export function formatPgc(value: number | null | undefined): string {
   if (value == null) return '—'
   return `${(value * 100).toFixed(1)}%`
@@ -155,6 +215,12 @@ export function formatWeek(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   const date = new Date(y, m - 1, d)
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+export function formatWeekday(iso: string): string {
+  const [y, m, d] = iso.split('-').map(Number)
+  const date = new Date(y, m - 1, d)
+  return date.toLocaleDateString('en-US', { weekday: 'short' })
 }
 
 export function mergeFocusLog(

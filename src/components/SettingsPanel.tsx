@@ -206,9 +206,15 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
               <li>
                 Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so the rep drawer has
                 history for the sparkline. Grain is Call Created At Week × Consultant, pivoted by Audience
-                (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). There is no Overall slice.
+                (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). The clone filters Looker
+                Work Group = High School so Sales Training and other groups drop off.
               </li>
-              <li>WTD is the same look, Call Created At Date = this Sunday → now (daily standups).</li>
+              <li>
+                WTD DoD clones the same look at Call Created At Date (this Sunday → today) with dashboard 7699
+                filters (Business, Expert Type, Consultant cc90) and Work Group = High School. Each cell is that
+                day’s pGC; DoD is vs the prior calendar day.
+              </li>
+              <li>The playbook WTD column is still the week-to-date rollup (Sunday → now), not the daily grid.</li>
               <li>Deltas display in basis points (100 bps = 1%).</li>
               <li>Focus tags are per audience (HS, K12, Super) for that calendar week. Notes can only be written for the current week; prior weeks are view-only.</li>
               <li>When the calendar rolls to a new Sunday, last week’s focus stays in history and this week starts empty.</li>
