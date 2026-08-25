@@ -217,9 +217,8 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
                 day’s pGC; DoD is vs the prior calendar day.
               </li>
               <li>
-                WTD is the in-progress Sunday week on the Playbook week control (not a separate tab). The daily
-                grid and team blocks (WTD pGC, at target, improving DoD) show when WTD is selected. Closed weeks
-                stay on the same pager.
+                WTD is the newest stop on the Playbook week pager (› from the latest closed week). The daily
+                grid and team blocks (WTD pGC, at target, improving DoD) show there. Closed weeks stay on ‹.
               </li>
               <li>Deltas display in basis points (100 bps = 1%).</li>
               <li>Focus tags are per audience (HS, K12, Super) for that calendar week. Notes can only be written for the current week; prior weeks are view-only.</li>

@@ -180,45 +180,31 @@ export function FilterBar({
             </Field>
 
             <Field label="Week">
-              <div className="flex items-center gap-1">
+              <div className="flex items-center rounded-lg bg-slate-100/80 p-0.5">
                 <button
                   type="button"
-                  className="seg-btn px-2.5 py-1 text-xs"
-                  data-on={wtdWeek}
-                  title="In-progress week · Sunday → today"
-                  onClick={() => onWeekCursor(0)}
+                  className="seg-btn px-2 py-1 text-xs"
+                  aria-label="Older week"
+                  disabled={weekCursor >= oldestCursor}
+                  onClick={() => onWeekCursor(Math.min(weekCursor + 1, oldestCursor))}
                 >
-                  WTD
+                  ‹
                 </button>
-                <div className="flex items-center rounded-lg bg-slate-100/80 p-0.5">
-                  <button
-                    type="button"
-                    className="seg-btn px-2 py-1 text-xs"
-                    aria-label="Older week"
-                    disabled={weekCursor >= oldestCursor}
-                    onClick={() => onWeekCursor(wtdWeek ? 1 : Math.min(weekCursor + 1, oldestCursor))}
-                  >
-                    ‹
-                  </button>
-                  <button
-                    type="button"
-                    className="min-w-18 px-2 text-center text-xs font-semibold text-slate-800"
-                    data-on={!wtdWeek}
-                    title="Closed Sunday week"
-                    onClick={() => onWeekCursor(wtdWeek ? 1 : weekCursor)}
-                  >
-                    {selectedWeek ? formatWeek(selectedWeek) : '—'}
-                  </button>
-                  <button
-                    type="button"
-                    className="seg-btn px-2 py-1 text-xs"
-                    aria-label="Newer week"
-                    disabled={wtdWeek}
-                    onClick={() => onWeekCursor(weekCursor <= 1 ? 0 : weekCursor - 1)}
-                  >
-                    ›
-                  </button>
-                </div>
+                <span
+                  className="min-w-18 px-2 text-center text-xs font-semibold text-slate-800"
+                  title={wtdWeek ? 'In-progress week · Sunday → today' : 'Closed Sunday week'}
+                >
+                  {wtdWeek ? 'WTD' : selectedWeek ? formatWeek(selectedWeek) : '—'}
+                </span>
+                <button
+                  type="button"
+                  className="seg-btn px-2 py-1 text-xs"
+                  aria-label="Newer week"
+                  disabled={wtdWeek}
+                  onClick={() => onWeekCursor(Math.max(weekCursor - 1, 0))}
+                >
+                  ›
+                </button>
               </div>
             </Field>
 
