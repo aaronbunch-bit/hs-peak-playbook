@@ -247,6 +247,26 @@ export function buildDailyRows(
     })
 }
 
+/** Missing pGC always sorts after real values, for both asc and desc. */
+export function comparePgcNullsLast(
+  a: number | null | undefined,
+  b: number | null | undefined,
+  dir: 'asc' | 'desc',
+): number {
+  const aMissing = a == null
+  const bMissing = b == null
+  if (aMissing && bMissing) return 0
+  if (aMissing) return 1
+  if (bMissing) return -1
+  const sign = dir === 'asc' ? 1 : -1
+  if (a === b) return 0
+  return sign * ((a as number) - (b as number))
+}
+
+export function pgcOnDate(row: DailyRepRow, date: string): number | null {
+  return row.days.find((d) => d.date === date)?.pgc ?? null
+}
+
 export function formatPgc(value: number | null | undefined): string {
   if (value == null) return '—'
   return `${(value * 100).toFixed(1)}%`

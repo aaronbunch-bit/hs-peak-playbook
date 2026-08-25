@@ -1,7 +1,18 @@
-import { formatBps, formatPgc, formatWeek, formatWeekday, type DailyRepRow } from '../lib/pacer'
+import { useMemo, useState } from 'react'
+import {
+  comparePgcNullsLast,
+  formatBps,
+  formatPgc,
+  formatWeek,
+  formatWeekday,
+  pgcOnDate,
+  type DailyRepRow,
+} from '../lib/pacer'
 import type { LcCurves } from '../lib/settings'
 import type { Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
+
+type SortKey = 'name' | 'manager' | string
 
 type Props = {
   rows: DailyRepRow[]
@@ -18,9 +29,62 @@ function Dod({ value }: { value: number | null }) {
   return <span className={`text-[10px] tabular-nums ${cls}`}>{formatBps(value)}</span>
 }
 
+function SortBtn({
+  label,
+  active,
+  dir,
+  align = 'left',
+  onClick,
+}: {
+  label: string
+  active: boolean
+  dir: 'asc' | 'desc'
+  align?: 'left' | 'right'
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1 text-[11px] font-semibold tracking-wide uppercase ${
+        align === 'right' ? 'w-full justify-end' : ''
+      } ${active ? 'text-white' : 'text-slate-300 hover:text-white'}`}
+    >
+      {label}
+      <span className="text-[10px]">{active ? (dir === 'asc' ? '▲' : '▼') : ''}</span>
+    </button>
+  )
+}
+
 export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect }: Props) {
   const days = rows[0]?.days.map((d) => d.date) ?? []
   const sliceLabel = slice === 'hs-stem' ? 'HS-STEM' : slice === 'k12tp' ? 'K12 Test Prep' : 'Supergroup'
+  const defaultDay = days.at(-1) ?? 'name'
+  const [sortKey, setSortKey] = useState<SortKey>(defaultDay)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const activeKey = days.includes(sortKey) || sortKey === 'name' || sortKey === 'manager' ? sortKey : defaultDay
+
+  const onSort = (key: SortKey) => {
+    if (key === activeKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    else {
+      setSortKey(key)
+      setSortDir(key === 'name' || key === 'manager' ? 'asc' : 'desc')
+    }
+  }
+
+  const sorted = useMemo(() => {
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      if (activeKey === 'name' || activeKey === 'manager') {
+        const av = activeKey === 'name' ? a.name : (a.manager ?? '')
+        const bv = activeKey === 'name' ? b.name : (b.manager ?? '')
+        const cmp = av.localeCompare(bv)
+        return cmp === 0 ? a.name.localeCompare(b.name) : dir * cmp
+      }
+      const cmp = comparePgcNullsLast(pgcOnDate(a, activeKey), pgcOnDate(b, activeKey), sortDir)
+      return cmp === 0 ? a.name.localeCompare(b.name) : cmp
+    })
+  }, [rows, activeKey, sortDir])
 
   return (
     <div className="mx-auto max-w-6xl overflow-hidden rounded-2xl surface">
@@ -29,23 +93,32 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
           <thead className="bg-slate-900 text-left">
             <tr>
               <th className="sticky left-0 z-10 bg-slate-900 px-4 py-3 font-medium sm:px-5">
-                <span className="text-[11px] font-semibold tracking-wide text-slate-300 uppercase">Rep</span>
+                <SortBtn label="Rep" active={activeKey === 'name'} dir={sortDir} onClick={() => onSort('name')} />
               </th>
               <th className="px-3 py-3 font-medium">
-                <span className="text-[11px] font-semibold tracking-wide text-slate-300 uppercase">Manager</span>
+                <SortBtn
+                  label="Manager"
+                  active={activeKey === 'manager'}
+                  dir={sortDir}
+                  onClick={() => onSort('manager')}
+                />
               </th>
               {days.map((date) => (
                 <th key={date} className="px-3 py-3 text-right font-medium">
-                  <div className="text-[11px] font-semibold tracking-wide text-white uppercase">
-                    {formatWeekday(date)}
-                  </div>
+                  <SortBtn
+                    label={formatWeekday(date)}
+                    active={activeKey === date}
+                    dir={sortDir}
+                    align="right"
+                    onClick={() => onSort(date)}
+                  />
                   <div className="text-[10px] font-medium text-slate-400">{formatWeek(date)}</div>
                 </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, i) => {
+            {sorted.map((row, i) => {
               const isSel = selected === row.name
               return (
                 <tr
@@ -83,7 +156,7 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
                 </tr>
               )
             })}
-            {rows.length === 0 && (
+            {sorted.length === 0 && (
               <tr>
                 <td colSpan={Math.max(days.length + 2, 3)} className="px-5 py-12 text-center text-slate-500">
                   No High School reps with {sliceLabel} volume this week.
@@ -94,8 +167,8 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
         </table>
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-        WTD is this Sunday through today. Each day is pGC for {sliceLabel} on that date. DoD is that day’s pGC minus
-        the prior calendar day (bps). Roster is High School Peak by name. Empty days are —.
+        Click a day to sort by that day’s pGC. Blanks stay at the bottom in both directions. WTD is this Sunday
+        through today. DoD is that day’s pGC minus the prior calendar day (bps). Empty days are —.
       </p>
     </div>
   )
