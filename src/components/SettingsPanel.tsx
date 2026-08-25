@@ -207,11 +207,13 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
                 Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so the rep drawer has
                 history for the sparkline. Grain is Call Created At Week × Consultant, pivoted by Audience
                 (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). The clone filters Looker
-                Work Group = High School so Sales Training and other groups drop off.
+                by Rep Name from the High School Peak list. Looker Rep Manager, Work Group, and Super Group are
+                left open because those employee fields lag HR. People on that list still appear if they have no
+                volume yet.
               </li>
               <li>
                 WTD DoD clones the same look at Call Created At Date (this Sunday → today) with dashboard 7699
-                filters (Business, Expert Type, Consultant cc90) and Work Group = High School. Each cell is that
+                filters (Business, Expert Type, Consultant cc90) and the same Rep Name list. Each cell is that
                 day’s pGC; DoD is vs the prior calendar day.
               </li>
               <li>The playbook WTD column is still the week-to-date rollup (Sunday → now), not the daily grid.</li>

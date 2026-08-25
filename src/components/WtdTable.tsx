@@ -89,7 +89,7 @@ export function WtdTable({ rows, selected, slice, onSelect }: Props) {
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         WTD is this Sunday through today. Each day is pGC for {sliceLabel} on that date. DoD is that day’s pGC minus
-        the prior calendar day (bps). Roster is Work Group = High School. Empty days are —.
+        the prior calendar day (bps). Roster is High School Peak by name. Empty days are —.
       </p>
     </div>
   )

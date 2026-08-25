@@ -19,7 +19,7 @@ One row per **Consultant** per **Sunday week**, pivoted by **Audience**:
 | K12 Test Prep CC90 / pGC / CC90 Mix | K12TP |
 | **Total pGC** | **Supergroup** (volume-weighted HS + K12) |
 
-The clone also filters Looker **Work Group = High School** (dashboard 7699’s Work Group field). K12 Test Prep is an Audience, not a work group.
+The clone filters Looker **Rep Name** to the High School Peak list and does **not** filter Rep Manager, Work Group, or Super Group — those employee fields lag HR. K12 Test Prep is an Audience, not a work group. People on that list still appear if they have no HS/K12 volume yet.
 
 There is no Overall. Total pGC is Supergroup.
 

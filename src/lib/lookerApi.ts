@@ -1,5 +1,5 @@
 import { daysSundayThroughToday, sundayWeekStart, toIsoDate } from './calendar'
-import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
+import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName, lookerRepNameFilter, overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
@@ -8,7 +8,7 @@ import type { DailyRow, LookerFact, PacerPayload, Slice, Staffing } from './type
 const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
 const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
 const DATE_FIELD = 'call_data_with_coselling.call_created_at_date'
-const WORK_GROUP_FIELD = 'call_data_with_coselling.work_group'
+const REP_NAME_FIELD = 'call_data_with_coselling.mgr_name'
 
 /** Dashboard 7699 defaults that the DoD clone should match. */
 const DASHBOARD_7699_FILTERS: Record<string, string> = {
@@ -104,8 +104,15 @@ async function runQueryCsv(
   return res.text()
 }
 
-function workGroupValue(): string {
-  return env('LOOKER_WORK_GROUP') || HIGH_SCHOOL_WORK_GROUP
+/** Roster is the Rep Name list. Looker manager / work-group fields lag HR. */
+function membershipAgnosticFilters(filters: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(filters)) {
+    const field = key.split('.').pop() ?? key
+    if (field === 'supervisor' || field === 'work_group' || field === 'work_group_blended') continue
+    out[key] = value
+  }
+  return out
 }
 
 function queryBody(
@@ -114,10 +121,10 @@ function queryBody(
   extra?: { fields?: string[]; filters?: Record<string, string>; sorts?: string[] },
 ): Record<string, unknown> {
   const filters = {
-    ...(query.filters ?? {}),
+    ...membershipAgnosticFilters(query.filters ?? {}),
     [LOOKER_TIME_FILTER]: timeFilter,
-    [WORK_GROUP_FIELD]: workGroupValue(),
-    ...(extra?.filters ?? {}),
+    [REP_NAME_FIELD]: lookerRepNameFilter(),
+    ...membershipAgnosticFilters(extra?.filters ?? {}),
   }
   return {
     model: query.model,
@@ -148,7 +155,9 @@ async function runClosedWeeks(token: string, query: LookerQuery): Promise<{ csv:
 async function runWtd(token: string, query: LookerQuery): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
-  return runQueryCsv(token, query, `${sunday} to ${today}`)
+  return runQueryCsv(token, query, `${sunday} to ${today}`, {
+    filters: DASHBOARD_7699_FILTERS,
+  })
 }
 
 async function runDod(token: string, query: LookerQuery): Promise<string> {
@@ -206,11 +215,6 @@ export function payloadFromFacts(
   dailyFacts: LookerFact[] = [],
 ): PacerPayload {
   const weekly = facts.map((f) => factToWeekly(f, slice)).filter((row) => row != null)
-  const names = new Set([
-    ...weekly.map((w) => w.rep),
-    ...dailyFacts.map((f) => f.name),
-    ...wtdFacts.map((f) => f.name),
-  ])
   const weeks = [...new Set(facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
   const wtdWeek = sundayWeekStart()
   const wtd = wtdFacts
@@ -232,7 +236,7 @@ export function payloadFromFacts(
     improvePts: seed.improvePts,
     degradePts: seed.degradePts,
     weeks,
-    roster: rosterFromFacts(rosterFacts).filter((r) => names.has(r.name)),
+    roster: overlayHighSchoolRoster(rosterFromFacts(rosterFacts)),
     weekly,
     wtd,
     daily: dailyFromFacts(dailyFacts, slice),
@@ -264,7 +268,13 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
   const facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
   const wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
   const dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
-  const payload = payloadFromFacts(slice, facts, wtdFacts, `Looker look ${lookId()} · Work Group ${workGroupValue()}`, dailyFacts)
+  const payload = payloadFromFacts(
+    slice,
+    facts,
+    wtdFacts,
+    `Looker look ${lookId()} · High School Peak by Rep Name`,
+    dailyFacts,
+  )
   if (payload.weekly.length === 0 && payload.daily.length === 0) {
     return emptyPayload(slice, `No rows for ${SLICE_LOOKER_FILTERS[slice].label} from Looker look ${lookId()}.`)
   }

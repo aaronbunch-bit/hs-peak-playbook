@@ -137,7 +137,6 @@ export function buildRows(
         focusHistory: payload.focusLog.filter((f) => f.rep === r.name),
       }
     })
-    .filter((row) => row.pgc != null || (row.cc90 != null && row.cc90 > 0))
 }
 
 export type DailyPoint = {
@@ -195,7 +194,6 @@ export function buildDailyRows(
         days: series,
       }
     })
-    .filter((row) => row.days.some((d) => d.pgc != null || (d.cc90 != null && d.cc90 > 0)))
 }
 
 export function formatPgc(value: number | null | undefined): string {

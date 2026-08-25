@@ -17,7 +17,7 @@ import type { LookerFact, Slice, WeeklyRow } from './types'
  *
  * WTD rollup uses the same look with Call Created At Date = this Sunday → now.
  * WTD DoD swaps the week dimension for Call Created At Date (one row per day)
- * and filters Work Group = High School.
+ * and filters Consultant / Rep Name to the High School Peak list.
  */
 
 export const LOOKER_PLAYBOOK_FIELDS = [
