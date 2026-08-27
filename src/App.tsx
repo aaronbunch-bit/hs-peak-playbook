@@ -106,6 +106,8 @@ export default function App() {
   const [sortKey, setSortKey] = useState<SortKey>('pgc')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [reload, setReload] = useState(0)
+  const [playbookLoading, setPlaybookLoading] = useState(false)
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [routingPeriod, setRoutingPeriod] = useState<RoutingPeriod>(initial.routingPeriod)
   const [routingGroup, setRoutingGroup] = useState<RoutingGroup | null>(initial.routingGroup)
   const [routingStart, setRoutingStart] = useState(initial.routingFrom)
@@ -207,16 +209,21 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    setPlaybookLoading(true)
     fetchPacerData(slice, staffingAllowed(slice) ? staffing : 'primary').then((data) => {
-      if (!cancelled) {
-        setPayload(data)
-        setWeekCursor((c) => (c === 0 ? 0 : 1))
-      }
+      if (cancelled) return
+      setPayload(data)
+      setPlaybookLoading(false)
+      setUpdatedAt(Date.now())
     })
     return () => {
       cancelled = true
     }
   }, [slice, staffing, reload])
+
+  useEffect(() => {
+    setWeekCursor((c) => (c === 0 ? 0 : 1))
+  }, [slice, staffing])
 
   useEffect(() => {
     if (tab !== 'routing') return
@@ -229,6 +236,7 @@ export default function App() {
         setRoutingFacts(data.facts)
         setRoutingError(data.empty ? (data.emptyReason ?? 'No rows for this range.') : null)
         setRoutingLoading(false)
+        setUpdatedAt(Date.now())
       })
       .catch(() => {
         if (cancelled) return
@@ -250,6 +258,7 @@ export default function App() {
         if (cancelled) return
         setIntraday(data)
         setIntradayLoading(false)
+        setUpdatedAt(Date.now())
       })
       .catch(() => {
         if (cancelled) return
@@ -553,6 +562,8 @@ export default function App() {
         onRestoreHidden={onRestoreHidden}
         onOpenSettings={() => setSettingsOpen(true)}
         onRefresh={() => setReload((n) => n + 1)}
+        refreshing={tab === 'routing' ? routingLoading : tab === 'intraday' ? intradayLoading : playbookLoading}
+        updatedAt={updatedAt}
         routingPeriod={routingPeriod}
         routingStart={routingStart}
         routingEnd={routingEnd}

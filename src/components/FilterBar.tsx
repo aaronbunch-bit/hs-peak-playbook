@@ -48,6 +48,8 @@ type Props = {
   onRestoreHidden: () => void
   onOpenSettings: () => void
   onRefresh: () => void
+  refreshing?: boolean
+  updatedAt?: number | null
   routingPeriod?: RoutingPeriod
   routingStart?: string
   routingEnd?: string
@@ -88,6 +90,8 @@ export function FilterBar({
   onRestoreHidden,
   onOpenSettings,
   onRefresh,
+  refreshing = false,
+  updatedAt = null,
   routingPeriod = 'yesterday',
   routingStart,
   routingEnd,
@@ -148,13 +152,35 @@ export function FilterBar({
               </button>
             </nav>
           </div>
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-2">
+            {updatedAt != null && !refreshing && (
+              <span className="hidden text-[11px] font-medium text-slate-400 sm:inline">
+                Updated {new Date(updatedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+              </span>
+            )}
             <button
               type="button"
               onClick={onRefresh}
-              className="rounded-lg px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-white/80 hover:text-slate-800"
+              disabled={refreshing}
+              aria-busy={refreshing}
+              title="Reload Looker data for this view"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 disabled:cursor-wait disabled:bg-slate-700"
             >
-              Refresh
+              <svg
+                viewBox="0 0 16 16"
+                aria-hidden="true"
+                className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M13.5 8a5.5 5.5 0 1 1-1.4-3.6M13.5 8V3.5M13.5 8H9"
+                />
+              </svg>
+              {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
             <button
               type="button"
