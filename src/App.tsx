@@ -35,7 +35,7 @@ import { loadSettings, saveSettings, targetForSlice, type AppSettings } from './
 import { suggestFocuses } from './lib/suggest'
 import { ROUTING_GROUP_META, ROUTING_OVERALL_META } from './data/routingGroups'
 import { buildRoutingRows, routingGroupStats, type RoutingRepRow } from './lib/routing'
-import { clampRange, periodMatchingRange, rangeForRoutingPeriod } from './lib/routingRange'
+import { clampRange, rangeForRoutingPeriod } from './lib/routingRange'
 import type { Cohort, PacerPayload, RepRow, RoutingFact, RoutingGroup, RoutingPeriod, Slice, Staffing } from './lib/types'
 
 function syntheticRepRow(row: RoutingRepRow): RepRow {
@@ -113,11 +113,8 @@ export default function App() {
   }, [routingFacts, livePayload, slice, targetPgc, settings.lcCurves])
 
   const routingRows = useMemo(
-    () =>
-      routingRowsAll
-        .filter((r) => !manager || r.manager === manager)
-        .filter((r) => r.routingGroup !== 'primary' || !hiddenSet.has(r.name)),
-    [routingRowsAll, manager, hiddenSet],
+    () => routingRowsAll.filter((r) => r.routingGroup !== 'primary' || !hiddenSet.has(r.name)),
+    [routingRowsAll, hiddenSet],
   )
 
   const routingStats = useMemo(
@@ -133,17 +130,11 @@ export default function App() {
   }, [routingRows, routingGroup])
 
   const managers = useMemo(() => {
-    if (tab === 'routing') {
-      const names = new Set(
-        routingRowsAll.map((r) => r.manager).filter((name): name is string => Boolean(name)),
-      )
-      return [...names].sort((a, b) => a.localeCompare(b))
-    }
     const names = new Set(
       (livePayload?.roster ?? []).map((r) => r.manager).filter((name): name is string => Boolean(name)),
     )
     return [...names].sort((a, b) => a.localeCompare(b))
-  }, [tab, routingRowsAll, livePayload])
+  }, [livePayload])
 
   useEffect(() => {
     const onPlaybook = tab === 'playbook'
@@ -452,7 +443,11 @@ export default function App() {
   const onShowRep = (name: string) => persistHidden(showRep(hiddenReps, name))
   const onRestoreHidden = () => persistHidden([])
 
-  const applyRoutingPreset = (period: Exclude<RoutingPeriod, 'custom'>) => {
+  const applyRoutingPreset = (period: RoutingPeriod) => {
+    if (period === 'custom') {
+      setRoutingPeriod('custom')
+      return
+    }
     const range = rangeForRoutingPeriod(period)
     setRoutingPeriod(period)
     setRoutingStart(range.start)
@@ -463,7 +458,7 @@ export default function App() {
     const range = clampRange(start, end)
     setRoutingStart(range.start)
     setRoutingEnd(range.end)
-    setRoutingPeriod(periodMatchingRange(range.start, range.end))
+    setRoutingPeriod('custom')
   }
 
   return (
@@ -506,19 +501,15 @@ export default function App() {
       <main className="mt-4 space-y-4">
         {tab === 'routing' ? (
           <>
-            <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">
-              All HS-STEM and K12 Test Prep volume — not just Peak. Each block is clients sold ÷ that
-              bucket’s cc90, not an average of averages. Click a group for the person list.
-              {routingLoading ? ' Loading range…' : ''}
-            </p>
-            {routingError && !routingLoading ? (
+            {routingLoading ? (
+              <p className="mx-auto max-w-6xl px-4 text-xs text-slate-400 sm:px-6">Loading range…</p>
+            ) : routingError ? (
               <p className="mx-auto max-w-6xl px-4 text-sm text-amber-700 sm:px-6">{routingError}</p>
             ) : null}
             <RoutingBlocks
               stats={routingStats}
               overall={routingOverall}
               selected={routingGroup}
-              slice={slice}
               loading={routingLoading}
               onSelect={(group) => {
                 setRoutingGroup(group)

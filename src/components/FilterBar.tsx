@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 import type { Cohort, RoutingPeriod, Slice, Staffing } from '../lib/types'
 import { staffingAllowed, type AppTab } from '../lib/hash'
 import { addDays, toIsoDate } from '../lib/calendar'
-import { formatDateRange, formatPgc, formatWeek } from '../lib/pacer'
+import { formatPgc, formatWeek } from '../lib/pacer'
 import { targetForSlice, type Targets } from '../lib/settings'
 
 const SLICES: { id: Slice; label: string }[] = [
@@ -17,11 +17,12 @@ const COHORTS: { id: Cohort; label: string }[] = [
   { id: 'lc4', label: 'LC4' },
 ]
 
-const ROUTING_PRESETS: { id: Exclude<RoutingPeriod, 'custom'>; label: string }[] = [
+const ROUTING_PRESETS: { id: RoutingPeriod; label: string }[] = [
   { id: 'yesterday', label: 'Yday' },
   { id: 'wtd', label: 'WTD' },
   { id: 'week', label: 'Last wk' },
   { id: 'mtd', label: 'MTD' },
+  { id: 'custom', label: 'Custom' },
 ]
 
 const DATE_INPUT =
@@ -50,7 +51,7 @@ type Props = {
   routingPeriod?: RoutingPeriod
   routingStart?: string
   routingEnd?: string
-  onRoutingPeriod?: (period: Exclude<RoutingPeriod, 'custom'>) => void
+  onRoutingPeriod?: (period: RoutingPeriod) => void
   onRoutingRange?: (start: string, end: string) => void
 }
 
@@ -280,7 +281,7 @@ export function FilterBar({
         )}
 
         {tab === 'routing' && (
-          <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl surface px-3.5 py-2.5">
             <Field label="Audience">
               <Seg>
                 {SLICES.map((s) => (
@@ -298,62 +299,47 @@ export function FilterBar({
             </Field>
 
             <Field label="Period">
-              <Seg>
-                {ROUTING_PRESETS.map((preset) => (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className="seg-btn px-2.5 py-1 text-xs"
-                    data-on={routingPeriod === preset.id}
-                    onClick={() => onRoutingPeriod?.(preset.id)}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
-              </Seg>
-            </Field>
-
-            <Field label="Dates">
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  value={rangeStart}
-                  min={minDate}
-                  max={today}
-                  onChange={(e) => onRoutingRange?.(e.target.value, rangeEnd)}
-                  className={DATE_INPUT}
-                  aria-label="From date"
-                />
-                <span className="text-xs text-slate-400">–</span>
-                <input
-                  type="date"
-                  value={rangeEnd}
-                  min={minDate}
-                  max={today}
-                  onChange={(e) => onRoutingRange?.(rangeStart, e.target.value)}
-                  className={DATE_INPUT}
-                  aria-label="To date"
-                />
+              <div className="flex flex-wrap items-center gap-2">
+                <Seg>
+                  {ROUTING_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className="seg-btn px-2.5 py-1 text-xs"
+                      data-on={routingPeriod === preset.id}
+                      onClick={() => onRoutingPeriod?.(preset.id)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </Seg>
+                {routingPeriod === 'custom' && (
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="date"
+                      value={rangeStart}
+                      min={minDate}
+                      max={today}
+                      onChange={(e) => onRoutingRange?.(e.target.value, rangeEnd)}
+                      className={DATE_INPUT}
+                      aria-label="From date"
+                    />
+                    <span className="text-xs text-slate-400">–</span>
+                    <input
+                      type="date"
+                      value={rangeEnd}
+                      min={minDate}
+                      max={today}
+                      onChange={(e) => onRoutingRange?.(rangeStart, e.target.value)}
+                      className={DATE_INPUT}
+                      aria-label="To date"
+                    />
+                  </div>
+                )}
               </div>
-              <span className="text-[11px] text-slate-400">{formatDateRange(rangeStart, rangeEnd)}</span>
             </Field>
 
-            <Field label="Manager">
-              <select
-                value={manager ?? ''}
-                onChange={(e) => onManager(e.target.value || null)}
-                className="h-[30px] rounded-lg bg-white px-2.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200/90"
-              >
-                <option value="">All managers</option>
-                {managers.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-
-            <div className="ml-auto flex flex-wrap items-center gap-2">
+            <div className="ml-auto">
               <button
                 type="button"
                 onClick={onOpenSettings}

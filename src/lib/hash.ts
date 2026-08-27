@@ -76,8 +76,9 @@ export function staffingAllowed(_slice: Slice): boolean {
 function routingFromHash(periodParam: string | null, fromParam: string | null, toParam: string | null) {
   if (isIsoDate(fromParam) && isIsoDate(toParam)) {
     const range = rangeForRoutingPeriod('custom', fromParam, toParam)
+    const explicit = isRoutingPeriod(periodParam) ? periodParam : periodMatchingRange(range.start, range.end)
     return {
-      routingPeriod: periodMatchingRange(range.start, range.end),
+      routingPeriod: explicit,
       routingFrom: range.start,
       routingTo: range.end,
     }
@@ -85,7 +86,7 @@ function routingFromHash(periodParam: string | null, fromParam: string | null, t
   const period = isRoutingPeriod(periodParam) ? periodParam : DEFAULT.routingPeriod
   const range = rangeForRoutingPeriod(period, fromParam, toParam)
   return {
-    routingPeriod: period === 'custom' ? periodMatchingRange(range.start, range.end) : period,
+    routingPeriod: period,
     routingFrom: range.start,
     routingTo: range.end,
   }
