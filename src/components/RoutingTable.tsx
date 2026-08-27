@@ -5,7 +5,7 @@ import type { LcCurves } from '../lib/settings'
 import type { Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
-type SortKey = 'name' | 'manager' | 'pgc'
+type SortKey = 'name' | 'manager' | 'pgc' | 'cc90'
 
 function SortBtn({
   label,
@@ -63,7 +63,7 @@ export function RoutingTable({
     if (key === sortKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     else {
       setSortKey(key)
-      setSortDir(key === 'pgc' ? 'desc' : 'asc')
+      setSortDir(key === 'name' || key === 'manager' ? 'asc' : 'desc')
     }
   }
 
@@ -75,6 +75,10 @@ export function RoutingTable({
         const bv = sortKey === 'name' ? b.name : (b.manager ?? '')
         const cmp = av.localeCompare(bv)
         return cmp === 0 ? a.name.localeCompare(b.name) : dir * cmp
+      }
+      if (sortKey === 'cc90') {
+        if (a.cc90 === b.cc90) return a.name.localeCompare(b.name)
+        return dir * (a.cc90 - b.cc90)
       }
       const cmp = comparePgcNullsLast(a.pgc, b.pgc, sortDir)
       return cmp === 0 ? a.name.localeCompare(b.name) : cmp
@@ -95,6 +99,9 @@ export function RoutingTable({
               </th>
               <th className="px-3 py-3 text-right font-medium">
                 <SortBtn label="pGC" active={sortKey === 'pgc'} dir={sortDir} align="right" onClick={() => onSort('pgc')} />
+              </th>
+              <th className="px-3 py-3 text-right font-medium">
+                <SortBtn label="cc90" active={sortKey === 'cc90'} dir={sortDir} align="right" onClick={() => onSort('cc90')} />
               </th>
             </tr>
           </thead>
@@ -117,26 +124,24 @@ export function RoutingTable({
                   </td>
                   <td className="w-px whitespace-nowrap px-3 py-3 text-slate-600">{row.manager ?? '—'}</td>
                   <td className="px-3 py-3 text-right">
-                    <div className="flex flex-col items-end gap-0.5">
-                      <PgcStatus
-                        value={row.pgc}
-                        atTarget={row.pgc != null && row.pgc >= row.expectedPgc}
-                        expected={row.expectedPgc}
-                        level={row.level}
-                        targetPgc={targetPgc}
-                        lcCurves={lcCurves}
-                      />
-                      <div className="text-[10px] text-slate-400">
-                        {row.cc90 > 0 ? `${row.cc90.toLocaleString()} cc90` : '—'}
-                      </div>
-                    </div>
+                    <PgcStatus
+                      value={row.pgc}
+                      atTarget={row.pgc != null && row.pgc >= row.expectedPgc}
+                      expected={row.expectedPgc}
+                      level={row.level}
+                      targetPgc={targetPgc}
+                      lcCurves={lcCurves}
+                    />
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-700">
+                    {row.cc90 > 0 ? row.cc90.toLocaleString() : '—'}
                   </td>
                 </tr>
               )
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={3} className="px-5 py-12 text-center text-slate-500">
+                <td colSpan={4} className="px-5 py-12 text-center text-slate-500">
                   No {groupLabel} people with {sliceLabel} volume for {periodLabel}.
                 </td>
               </tr>
