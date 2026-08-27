@@ -5,9 +5,11 @@ import { KpiStrip } from './components/KpiStrip'
 import { RepDrawer } from './components/RepDrawer'
 import { RepTable, type SortKey } from './components/RepTable'
 import { RosterPage } from './components/RosterPage'
+import { RoutingBlocks } from './components/RoutingBlocks'
+import { RoutingTable } from './components/RoutingTable'
 import { SettingsPanel } from './components/SettingsPanel'
 import { WtdTable } from './components/WtdTable'
-import { sundayWeekStart } from './lib/calendar'
+import { lastCompleteWeekStart, sundayWeekStart, yesterday } from './lib/calendar'
 import {
   focusedThisWeek,
   historyFromStore,
@@ -21,7 +23,7 @@ import {
 import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
 import { readHash, staffingAllowed, weekCursorFromHash, writeHash, type AppTab } from './lib/hash'
 import { fetchPacerData, SLICE_LOOKER_FILTERS } from './lib/looker'
-import { buildDailyRows, buildRows, formatWeek, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
+import { buildDailyRows, buildRows, formatWeek, formatWeekRange, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
 import {
   applyRosterLevels,
   loadRosterLevels,
@@ -31,7 +33,30 @@ import {
 import { hideRep, loadHiddenReps, saveHiddenReps, showRep } from './lib/hidden'
 import { loadSettings, saveSettings, targetForSlice, type AppSettings } from './lib/settings'
 import { suggestFocuses } from './lib/suggest'
-import type { Cohort, PacerPayload, Slice, Staffing } from './lib/types'
+import { ROUTING_GROUP_META } from './data/routingGroups'
+import { buildRoutingRows, routingGroupStats, type RoutingRepRow } from './lib/routing'
+import type { Cohort, PacerPayload, RepRow, RoutingGroup, RoutingPeriod, Slice, Staffing } from './lib/types'
+
+function syntheticRepRow(row: RoutingRepRow): RepRow {
+  return {
+    name: row.name,
+    level: row.level,
+    manager: row.manager,
+    pgc: row.pgc,
+    cc90: row.cc90,
+    mix: null,
+    expectedPgc: row.expectedPgc,
+    deltaWow: null,
+    trend: null,
+    atTarget: row.pgc != null && row.pgc >= row.expectedPgc,
+    wtdPgc: null,
+    wtdCc90: null,
+    wtdVsLast: null,
+    wtdAtTarget: false,
+    weeks: [],
+    focusHistory: [],
+  }
+}
 
 export default function App() {
   const initial = readHash()
@@ -53,6 +78,8 @@ export default function App() {
   const [sortKey, setSortKey] = useState<SortKey>('pgc')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [reload, setReload] = useState(0)
+  const [routingPeriod, setRoutingPeriod] = useState<RoutingPeriod>(initial.routingPeriod)
+  const [routingGroup, setRoutingGroup] = useState<RoutingGroup | null>(initial.routingGroup)
 
   const focusWeek = sundayWeekStart()
   const targetPgc = targetForSlice(slice, settings.targets)
@@ -70,15 +97,51 @@ export default function App() {
       })),
       daily: payload.daily ?? [],
       dailyDays: payload.dailyDays ?? [],
+      yesterdayDate: payload.yesterdayDate ?? yesterday(),
+      yesterdayFacts: payload.yesterdayFacts ?? [],
+      lastWeekStart: payload.lastWeekStart ?? lastCompleteWeekStart(),
+      lastWeekFacts: payload.lastWeekFacts ?? [],
     }
   }, [payload, rosterLevels])
 
+  const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
+
+  const routingRowsAll = useMemo(() => {
+    if (!livePayload) return []
+    const facts = routingPeriod === 'week' ? livePayload.lastWeekFacts : livePayload.yesterdayFacts
+    return buildRoutingRows(facts, slice, targetPgc, settings.lcCurves, livePayload.roster)
+  }, [livePayload, routingPeriod, slice, targetPgc, settings.lcCurves])
+
+  const routingRows = useMemo(
+    () =>
+      routingRowsAll
+        .filter((r) => !manager || r.manager === manager)
+        .filter((r) => r.routingGroup !== 'primary' || !hiddenSet.has(r.name)),
+    [routingRowsAll, manager, hiddenSet],
+  )
+
+  const routingStats = useMemo(
+    () => ROUTING_GROUP_META.map((meta) => routingGroupStats(routingRows, meta.id)),
+    [routingRows],
+  )
+
+  const routingDetailRows = useMemo(
+    () => (routingGroup ? routingRows.filter((r) => r.routingGroup === routingGroup) : []),
+    [routingRows, routingGroup],
+  )
+
   const managers = useMemo(() => {
+    if (tab === 'yesterday') {
+      const names = new Set(
+        routingRowsAll.map((r) => r.manager).filter((name): name is string => Boolean(name)),
+      )
+      return [...names].sort((a, b) => a.localeCompare(b))
+    }
     const names = new Set(
       (livePayload?.roster ?? []).map((r) => r.manager).filter((name): name is string => Boolean(name)),
     )
     return [...names].sort((a, b) => a.localeCompare(b))
-  }, [livePayload])
+  }, [tab, routingRowsAll, livePayload])
 
   useEffect(() => {
     const onPlaybook = tab === 'playbook'
@@ -90,8 +153,10 @@ export default function App() {
       manager,
       tab: hashTab,
       week: onPlaybook && weekCursor > 1 && selectedWeek ? selectedWeek : onPlaybook && weekCursor === 0 ? 'wtd' : null,
+      routingPeriod,
+      routingGroup,
     })
-  }, [slice, cohort, staffing, manager, tab, weekCursor, selectedWeek])
+  }, [slice, cohort, staffing, manager, tab, weekCursor, selectedWeek, routingPeriod, routingGroup])
 
   useEffect(() => {
     const onHash = () => {
@@ -101,7 +166,11 @@ export default function App() {
       setStaffing(next.staffing)
       setManager(next.manager)
       setTab(next.tab === 'wtd' ? 'playbook' : next.tab)
-      setWeekCursor(weekCursorFromHash(next.tab, next.week, payload?.weeks ?? []))
+      if (next.tab !== 'yesterday') {
+        setWeekCursor(weekCursorFromHash(next.tab, next.week, payload?.weeks ?? []))
+      }
+      setRoutingPeriod(next.routingPeriod)
+      setRoutingGroup(next.routingGroup)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -159,8 +228,6 @@ export default function App() {
     })
     return manager ? built.filter((r) => r.manager === manager) : built
   }, [livePayload, cohort, focus, targetPgc, closedWeekIndex, staffing, manager, settings.lcCurves])
-
-  const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
 
   const dailyRows = useMemo(() => {
     if (!livePayload || livePayload.empty) return []
@@ -281,8 +348,13 @@ export default function App() {
       .filter((item) => !manager || item.manager === manager)
   }, [catalogRows, livePayload, focus, focusWeek, notes, manager])
 
+  const selectedRouting = routingDetailRows.find((r) => r.name === selected) ?? null
   const selectedRow =
-    rows.find((r) => r.name === selected) ?? catalogRows.find((r) => r.name === selected) ?? null
+    tab === 'yesterday'
+      ? selectedRouting
+        ? (catalogRows.find((r) => r.name === selectedRouting.name) ?? syntheticRepRow(selectedRouting))
+        : null
+      : (rows.find((r) => r.name === selected) ?? catalogRows.find((r) => r.name === selected) ?? null)
   const closedKpis = weekKpis(visibleRows, thatWeekFocusSet)
   const lastClosedFocusSet = useMemo(
     () => new Set(selectedWeek ? namesForWeek(focus, selectedWeek, slice) : []),
@@ -381,6 +453,10 @@ export default function App() {
         onRestoreHidden={onRestoreHidden}
         onOpenSettings={() => setSettingsOpen(true)}
         onRefresh={() => setReload((n) => n + 1)}
+        routingPeriod={routingPeriod}
+        yesterdayDate={livePayload?.yesterdayDate ?? yesterday()}
+        lastWeekStart={livePayload?.lastWeekStart ?? lastCompleteWeekStart()}
+        onRoutingPeriod={setRoutingPeriod}
       />
 
       <main className="mt-4 space-y-4">
@@ -414,6 +490,37 @@ export default function App() {
             onHide={onHideRep}
             onShow={onShowRep}
           />
+        ) : tab === 'yesterday' ? (
+          <>
+            <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">
+              Each block is clients sold in the bucket ÷ that bucket’s HS/K12 cc90 — not an average of
+              averages. Click a group for the person list.
+            </p>
+            <RoutingBlocks
+              stats={routingStats}
+              selected={routingGroup}
+              onSelect={(group) => {
+                setRoutingGroup(group)
+                setSelected(null)
+              }}
+            />
+            {routingGroup && (
+              <RoutingTable
+                rows={routingDetailRows}
+                selected={selected}
+                slice={slice}
+                targetPgc={targetPgc}
+                lcCurves={settings.lcCurves}
+                periodLabel={
+                  routingPeriod === 'week'
+                    ? formatWeekRange(livePayload.lastWeekStart)
+                    : formatWeek(livePayload.yesterdayDate)
+                }
+                groupLabel={ROUTING_GROUP_META.find((m) => m.id === routingGroup)?.label ?? routingGroup}
+                onSelect={setSelected}
+              />
+            )}
+          </>
         ) : livePayload.empty ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">

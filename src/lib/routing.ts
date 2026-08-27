@@ -1,0 +1,122 @@
+import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
+import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
+import { expectedPgc, type LcCurves } from './settings'
+import type { LookerFact, RoutingFact, RoutingGroup, Slice } from './types'
+
+export type RoutingVolume = {
+  sold: number
+  cc90: number
+  pgc: number | null
+}
+
+export type RoutingRepRow = {
+  name: string
+  manager: string | null
+  level: string | null
+  expectedPgc: number
+  routingGroup: RoutingGroup
+  pgc: number | null
+  cc90: number
+  sold: number
+}
+
+export type RoutingGroupStats = {
+  group: RoutingGroup
+  pgc: number | null
+  cc90: number
+  n: number
+}
+
+function hasHsK12Volume(fact: Pick<LookerFact, 'hsCc90' | 'k12Cc90' | 'hsPgc' | 'k12Pgc' | 'totalPgc'>): boolean {
+  return (
+    fact.hsCc90 > 0 ||
+    fact.k12Cc90 > 0 ||
+    fact.hsPgc != null ||
+    fact.k12Pgc != null ||
+    fact.totalPgc != null
+  )
+}
+
+export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
+  const out: RoutingFact[] = []
+  for (const fact of facts) {
+    const name = canonicalHighSchoolName(fact.name) ?? fact.name.trim()
+    if (!name || !hasHsK12Volume(fact)) continue
+    const routingGroup = assignRoutingGroup(name, fact.manager)
+    if (routingGroup === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
+    out.push({
+      date: fact.week,
+      name,
+      manager: fact.manager,
+      routingGroup,
+      hsCc90: fact.hsCc90,
+      hsPgc: fact.hsPgc,
+      k12Cc90: fact.k12Cc90,
+      k12Pgc: fact.k12Pgc,
+      totalPgc: fact.totalPgc,
+    })
+  }
+  return out
+}
+
+/** Clients sold ≈ pGC × cc90 per audience. Super is HS sold + K12 sold over HS+K12 cc90. */
+export function volumeForSlice(fact: RoutingFact, slice: Slice): RoutingVolume {
+  if (slice === 'hs-stem') {
+    const cc90 = fact.hsCc90
+    const sold = (fact.hsPgc ?? 0) * cc90
+    return { sold, cc90, pgc: cc90 > 0 ? sold / cc90 : null }
+  }
+  if (slice === 'k12tp') {
+    const cc90 = fact.k12Cc90
+    const sold = (fact.k12Pgc ?? 0) * cc90
+    return { sold, cc90, pgc: cc90 > 0 ? sold / cc90 : null }
+  }
+  const cc90 = fact.hsCc90 + fact.k12Cc90
+  const sold = (fact.hsPgc ?? 0) * fact.hsCc90 + (fact.k12Pgc ?? 0) * fact.k12Cc90
+  return { sold, cc90, pgc: cc90 > 0 ? sold / cc90 : null }
+}
+
+export function buildRoutingRows(
+  facts: RoutingFact[],
+  slice: Slice,
+  targetPgc: number,
+  lcCurves: LcCurves,
+  roster: Array<{ name: string; manager: string | null; level: string | null }>,
+): RoutingRepRow[] {
+  const byName = new Map(roster.map((r) => [r.name, r]))
+  const rows: RoutingRepRow[] = []
+  for (const fact of facts) {
+    const vol = volumeForSlice(fact, slice)
+    if (vol.cc90 <= 0 && vol.pgc == null) continue
+    if (fact.routingGroup === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
+    const rosterRow = byName.get(fact.name)
+    const level = rosterRow?.level ?? null
+    rows.push({
+      name: fact.name,
+      manager: rosterRow?.manager ?? fact.manager,
+      level,
+      expectedPgc: expectedPgc(targetPgc, level, lcCurves),
+      routingGroup: fact.routingGroup,
+      pgc: vol.pgc,
+      cc90: vol.cc90,
+      sold: vol.sold,
+    })
+  }
+  return rows
+}
+
+export function groupWeightedPgc(rows: Array<{ sold: number; cc90: number }>): number | null {
+  const cc90 = rows.reduce((sum, r) => sum + r.cc90, 0)
+  if (cc90 <= 0) return null
+  return rows.reduce((sum, r) => sum + r.sold, 0) / cc90
+}
+
+export function routingGroupStats(rows: RoutingRepRow[], group: RoutingGroup): RoutingGroupStats {
+  const scoped = rows.filter((r) => r.routingGroup === group)
+  return {
+    group,
+    pgc: groupWeightedPgc(scoped),
+    cc90: scoped.reduce((sum, r) => sum + r.cc90, 0),
+    n: scoped.length,
+  }
+}

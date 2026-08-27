@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import type { Cohort, Slice, Staffing } from '../lib/types'
+import type { Cohort, RoutingPeriod, Slice, Staffing } from '../lib/types'
 import { staffingAllowed, type AppTab } from '../lib/hash'
-import { formatPgc, formatWeek } from '../lib/pacer'
+import { formatPgc, formatWeek, formatWeekRange } from '../lib/pacer'
 import { targetForSlice, type Targets } from '../lib/settings'
 
 const SLICES: { id: Slice; label: string }[] = [
@@ -36,6 +36,10 @@ type Props = {
   onRestoreHidden: () => void
   onOpenSettings: () => void
   onRefresh: () => void
+  routingPeriod?: RoutingPeriod
+  yesterdayDate?: string | null
+  lastWeekStart?: string | null
+  onRoutingPeriod?: (period: RoutingPeriod) => void
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -71,6 +75,10 @@ export function FilterBar({
   onRestoreHidden,
   onOpenSettings,
   onRefresh,
+  routingPeriod = 'yesterday',
+  yesterdayDate = null,
+  lastWeekStart = null,
+  onRoutingPeriod,
 }: Props) {
   const showStaffing = staffingAllowed(slice)
   const wtdWeek = weekCursor === 0
@@ -95,6 +103,9 @@ export function FilterBar({
             <nav className="flex items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">
               <button type="button" className="nav-tab" data-on={tab === 'playbook' || tab === 'wtd'} onClick={() => onTab('playbook')}>
                 Playbook
+              </button>
+              <button type="button" className="nav-tab" data-on={tab === 'yesterday'} onClick={() => onTab('yesterday')}>
+                Yesterday
               </button>
               <button type="button" className="nav-tab" data-on={tab === 'focus'} onClick={() => onTab('focus')}>
                 Focus
@@ -241,6 +252,82 @@ export function FilterBar({
                   {hiddenCount} hidden · Restore
                 </button>
               )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'yesterday' && (
+          <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
+            <Field label="Audience">
+              <Seg>
+                {SLICES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className="seg-btn px-2.5 py-1 text-xs"
+                    data-on={slice === s.id}
+                    onClick={() => onSlice(s.id)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </Seg>
+            </Field>
+
+            <Field label="Period">
+              <Seg>
+                <button
+                  type="button"
+                  className="seg-btn px-2.5 py-1 text-xs"
+                  data-on={routingPeriod === 'yesterday'}
+                  onClick={() => onRoutingPeriod?.('yesterday')}
+                >
+                  Yesterday
+                </button>
+                <button
+                  type="button"
+                  className="seg-btn px-2.5 py-1 text-xs"
+                  data-on={routingPeriod === 'week'}
+                  onClick={() => onRoutingPeriod?.('week')}
+                >
+                  Last week
+                </button>
+              </Seg>
+              <span className="text-[11px] text-slate-400">
+                {routingPeriod === 'week'
+                  ? lastWeekStart
+                    ? formatWeekRange(lastWeekStart)
+                    : 'Closed Sunday week'
+                  : yesterdayDate
+                    ? formatWeek(yesterdayDate)
+                    : 'Prior calendar day'}
+              </span>
+            </Field>
+
+            <Field label="Manager">
+              <select
+                value={manager ?? ''}
+                onChange={(e) => onManager(e.target.value || null)}
+                className="h-[30px] rounded-lg bg-white px-2.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200/90"
+              >
+                <option value="">All managers</option>
+                {managers.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenSettings}
+                className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11px] font-semibold text-white"
+                title="LC4 pGC bar. Unknown LC uses this bar."
+              >
+                {sliceShort} {formatPgc(activeTarget)}
+              </button>
             </div>
           </div>
         )}

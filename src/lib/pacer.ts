@@ -286,6 +286,15 @@ export function formatWeek(iso: string): string {
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
+export function formatWeekRange(start: string): string {
+  const [y, m, d] = start.split('-').map(Number)
+  const from = new Date(y, m - 1, d)
+  const to = new Date(y, m - 1, d + 6)
+  const a = from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const b = to.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  return `${a}–${b}`
+}
+
 export function formatWeekday(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   const date = new Date(y, m - 1, d)

@@ -1,4 +1,4 @@
-import { daysSundayThroughToday, sundayWeekStart, toIsoDate } from './calendar'
+import { daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import type { PacerPayload, Slice } from './types'
 
 export const SLICE_LOOKER_FILTERS: Record<
@@ -51,6 +51,10 @@ export function emptyPayload(slice: Slice, reason: string): PacerPayload {
     dailyDays: daysSundayThroughToday(),
     wtdWeek: sundayWeekStart(),
     wtdAsOf: toIsoDate(new Date()),
+    yesterdayDate: yesterday(),
+    yesterdayFacts: [],
+    lastWeekStart: lastCompleteWeekStart(),
+    lastWeekFacts: [],
     focusLog: [],
     empty: true,
     emptyReason: reason,

@@ -28,6 +28,15 @@ export function previousSunday(iso: string): string {
   return addDays(iso, -7)
 }
 
+export function yesterday(d = new Date()): string {
+  return addDays(toIsoDate(d), -1)
+}
+
+/** Sunday start of the most recently closed week. */
+export function lastCompleteWeekStart(d = new Date()): string {
+  return previousSunday(sundayWeekStart(d))
+}
+
 /** Inclusive Sunday → today (ISO dates) for the in-progress week. */
 export function daysSundayThroughToday(d = new Date()): string[] {
   const start = sundayWeekStart(d)

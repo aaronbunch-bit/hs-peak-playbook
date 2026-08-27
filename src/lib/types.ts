@@ -7,6 +7,12 @@ export type Cohort = (typeof COHORTS)[number]
 export const STAFFINGS = ['primary', 'cross-train'] as const
 export type Staffing = (typeof STAFFINGS)[number]
 
+export const ROUTING_GROUPS = ['primary', 'training', 'cross-trained', 'overflow'] as const
+export type RoutingGroup = (typeof ROUTING_GROUPS)[number]
+
+export const ROUTING_PERIODS = ['yesterday', 'week'] as const
+export type RoutingPeriod = (typeof ROUTING_PERIODS)[number]
+
 export type Trend = 'up' | 'down' | 'stagnant'
 
 export type RosterEntry = {
@@ -64,6 +70,19 @@ export type DailyRow = {
   cc90: number | null
 }
 
+/** Unrestricted HS/K12 person row for Yesterday / last complete week. */
+export type RoutingFact = {
+  date: string
+  name: string
+  manager: string | null
+  routingGroup: RoutingGroup
+  hsCc90: number
+  hsPgc: number | null
+  k12Cc90: number
+  k12Pgc: number | null
+  totalPgc: number | null
+}
+
 export type FocusLogEntry = {
   week: string
   rep: string
@@ -98,6 +117,10 @@ export type PacerPayload = {
   dailyDays: string[]
   wtdWeek: string | null
   wtdAsOf: string | null
+  yesterdayDate: string
+  yesterdayFacts: RoutingFact[]
+  lastWeekStart: string
+  lastWeekFacts: RoutingFact[]
   focusLog: FocusLogEntry[]
   empty?: boolean
   emptyReason?: string

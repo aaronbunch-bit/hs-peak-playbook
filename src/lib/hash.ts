@@ -1,6 +1,17 @@
-import { COHORTS, SLICES, STAFFINGS, type Cohort, type Slice, type Staffing } from './types'
+import {
+  COHORTS,
+  ROUTING_GROUPS,
+  ROUTING_PERIODS,
+  SLICES,
+  STAFFINGS,
+  type Cohort,
+  type RoutingGroup,
+  type RoutingPeriod,
+  type Slice,
+  type Staffing,
+} from './types'
 
-export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus'
+export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus' | 'yesterday'
 
 export type HashState = {
   slice: Slice
@@ -9,6 +20,8 @@ export type HashState = {
   manager: string | null
   tab: AppTab
   week: string | null
+  routingPeriod: RoutingPeriod
+  routingGroup: RoutingGroup | null
 }
 
 const DEFAULT: HashState = {
@@ -18,6 +31,8 @@ const DEFAULT: HashState = {
   manager: null,
   tab: 'playbook',
   week: null,
+  routingPeriod: 'yesterday',
+  routingGroup: null,
 }
 
 function isSlice(v: string | null): v is Slice {
@@ -34,7 +49,15 @@ function isStaffing(v: string | null): v is Staffing {
 }
 
 function isTab(v: string | null): v is AppTab {
-  return v === 'playbook' || v === 'wtd' || v === 'roster' || v === 'focus'
+  return v === 'playbook' || v === 'wtd' || v === 'roster' || v === 'focus' || v === 'yesterday'
+}
+
+function isRoutingPeriod(v: string | null): v is RoutingPeriod {
+  return !!v && (ROUTING_PERIODS as readonly string[]).includes(v)
+}
+
+function isRoutingGroup(v: string | null): v is RoutingGroup {
+  return !!v && (ROUTING_GROUPS as readonly string[]).includes(v)
 }
 
 /** This look has no staffing / overflow flag. Cross Train stays an empty stub. */
@@ -51,6 +74,8 @@ export function readHash(): HashState {
   const staffingRaw = params.get('staffing')
   const manager = params.get('manager')?.trim() || null
   const tabParam = params.get('tab')
+  const periodParam = params.get('period')
+  const groupParam = params.get('group')
   return {
     slice,
     cohort: isCohort(cohortParam) ? cohortParam : DEFAULT.cohort,
@@ -58,6 +83,8 @@ export function readHash(): HashState {
     manager,
     tab: isTab(tabParam) ? tabParam : DEFAULT.tab,
     week: params.get('week'),
+    routingPeriod: isRoutingPeriod(periodParam) ? periodParam : DEFAULT.routingPeriod,
+    routingGroup: isRoutingGroup(groupParam) ? groupParam : null,
   }
 }
 
@@ -71,6 +98,10 @@ export function writeHash(state: HashState): void {
     params.set('staffing', state.staffing)
   }
   if (state.week) params.set('week', state.week)
+  if (state.tab === 'yesterday') {
+    if (state.routingPeriod !== 'yesterday') params.set('period', state.routingPeriod)
+    if (state.routingGroup) params.set('group', state.routingGroup)
+  }
   const next = `#${params.toString()}`
   if (window.location.hash !== next) {
     history.replaceState(null, '', `${window.location.pathname}${window.location.search}${next}`)
