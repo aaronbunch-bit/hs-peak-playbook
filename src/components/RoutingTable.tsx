@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react'
-import { comparePgcNullsLast, formatPgc } from '../lib/pacer'
+import { comparePgcNullsLast, formatImpact, formatPgc } from '../lib/pacer'
 import type { RoutingRepRow } from '../lib/routing'
 import type { LcCurves } from '../lib/settings'
 import type { Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
-type SortKey = 'name' | 'manager' | 'pgc' | 'cc90'
+type SortKey = 'name' | 'manager' | 'pgc' | 'cc90' | 'impact'
 
 function SortBtn({
   label,
@@ -80,6 +80,10 @@ export function RoutingTable({
         if (a.cc90 === b.cc90) return a.name.localeCompare(b.name)
         return dir * (a.cc90 - b.cc90)
       }
+      if (sortKey === 'impact') {
+        if (a.impact === b.impact) return a.name.localeCompare(b.name)
+        return dir * (a.impact - b.impact)
+      }
       const cmp = comparePgcNullsLast(a.pgc, b.pgc, sortDir)
       return cmp === 0 ? a.name.localeCompare(b.name) : cmp
     })
@@ -102,6 +106,15 @@ export function RoutingTable({
               </th>
               <th className="px-3 py-3 text-right font-medium">
                 <SortBtn label="cc90" active={sortKey === 'cc90'} dir={sortDir} align="right" onClick={() => onSort('cc90')} />
+              </th>
+              <th className="px-3 py-3 text-right font-medium">
+                <SortBtn
+                  label="Impact"
+                  active={sortKey === 'impact'}
+                  dir={sortDir}
+                  align="right"
+                  onClick={() => onSort('impact')}
+                />
               </th>
             </tr>
           </thead>
@@ -136,12 +149,15 @@ export function RoutingTable({
                   <td className="px-3 py-3 text-right tabular-nums text-slate-700">
                     {row.cc90 > 0 ? row.cc90.toLocaleString() : '—'}
                   </td>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-700">
+                    {formatImpact(row.impact)}
+                  </td>
                 </tr>
               )
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-5 py-12 text-center text-slate-500">
+                <td colSpan={5} className="px-5 py-12 text-center text-slate-500">
                   No {groupLabel} people with {sliceLabel} volume for {periodLabel}.
                 </td>
               </tr>
@@ -151,7 +167,7 @@ export function RoutingTable({
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         {periodLabel} · {groupLabel}. Group block is sold ÷ HS/K12 cc90 for the bucket, not an average of
-        averages. Blanks sort last.
+        averages. Impact is Looker Closed Client Count. Blanks sort last.
       </p>
     </div>
   )

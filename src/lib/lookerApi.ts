@@ -228,6 +228,7 @@ function dailyFromFacts(facts: LookerFact[], slice: Slice): DailyRow[] {
       rep: row.rep,
       pgc: row.pgc,
       cc90: row.cc90,
+      impact: row.impact ?? null,
     }))
 }
 
@@ -250,6 +251,7 @@ export function payloadFromFacts(
       rep: row.rep,
       pgc: row.pgc,
       cc90: row.cc90,
+      impact: row.impact ?? null,
     }))
   const rosterFacts = [...facts, ...dailyFacts, ...wtdFacts]
   return {

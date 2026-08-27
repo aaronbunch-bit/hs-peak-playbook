@@ -33,9 +33,11 @@ export type LookerFact = {
   hsCc90: number
   hsPgc: number | null
   hsMix: number | null
+  hsImpact?: number
   k12Cc90: number
   k12Pgc: number | null
   k12Mix: number | null
+  k12Impact?: number
   totalPgc: number | null
 }
 
@@ -44,6 +46,7 @@ export type WeeklyRow = {
   rep: string
   pgc: number
   cc90: number | null
+  impact?: number | null
   mix?: number | null
   hsCc90?: number | null
   hsPgc?: number | null
@@ -60,6 +63,7 @@ export type WtdRow = {
   rep: string
   pgc: number
   cc90: number | null
+  impact?: number | null
 }
 
 /** One consultant × calendar day for the in-progress week. */
@@ -68,6 +72,7 @@ export type DailyRow = {
   rep: string
   pgc: number | null
   cc90: number | null
+  impact?: number | null
 }
 
 /** Unrestricted HS/K12 person row rolled up over a routing date range. */
@@ -78,8 +83,10 @@ export type RoutingFact = {
   routingGroup: RoutingGroup
   hsCc90: number
   hsPgc: number | null
+  hsImpact: number
   k12Cc90: number
   k12Pgc: number | null
+  k12Impact: number
   totalPgc: number | null
 }
 
@@ -138,6 +145,7 @@ export type WeekPoint = {
   week: string
   pgc: number | null
   cc90: number | null
+  impact?: number | null
   deltaWow: number | null
   mix?: number | null
   hsPgc?: number | null
@@ -155,6 +163,7 @@ export type RepRow = {
   manager: string | null
   pgc: number | null
   cc90: number | null
+  impact: number | null
   mix: number | null
   expectedPgc: number
   deltaWow: number | null
@@ -162,6 +171,7 @@ export type RepRow = {
   atTarget: boolean
   wtdPgc: number | null
   wtdCc90: number | null
+  wtdImpact: number | null
   wtdVsLast: number | null
   wtdAtTarget: boolean
   weeks: WeekPoint[]

@@ -48,6 +48,7 @@ function seriesForRep(weeks: string[], rows: WeeklyRow[], name: string): WeekPoi
       week,
       pgc: row?.pgc ?? null,
       cc90: row?.cc90 ?? null,
+      impact: row?.impact ?? null,
       deltaWow: weekOverWeek(row?.pgc, prev?.pgc),
       mix: row?.mix ?? null,
       hsPgc: row?.hsPgc ?? null,
@@ -175,6 +176,7 @@ export function buildRows(
         manager: r.manager,
         pgc,
         cc90,
+        impact: point?.impact ?? null,
         mix: point?.mix ?? null,
         expectedPgc: expect,
         deltaWow,
@@ -182,6 +184,7 @@ export function buildRows(
         atTarget: pgc != null && pgc >= expect,
         wtdPgc,
         wtdCc90: wtd?.cc90 ?? null,
+        wtdImpact: wtd?.impact ?? null,
         wtdVsLast: weekOverWeek(wtdPgc, pgc),
         wtdAtTarget: wtdPgc != null && wtdPgc >= expect,
         weeks: weeksSeries,
@@ -194,6 +197,7 @@ export type DailyPoint = {
   date: string
   pgc: number | null
   cc90: number | null
+  impact: number | null
   dod: number | null
 }
 
@@ -202,6 +206,9 @@ export type DailyRepRow = {
   manager: string | null
   level: string | null
   expectedPgc: number
+  wtdPgc: number | null
+  wtdCc90: number | null
+  wtdImpact: number | null
   days: DailyPoint[]
 }
 
@@ -219,6 +226,7 @@ export function buildDailyRows(
     list.push(row)
     byRep.set(row.rep, list)
   }
+  const wtdByRep = new Map((payload.wtd ?? []).map((r) => [r.rep, r]))
   const staffing = options.staffing ?? 'primary'
   const curves = options.lcCurves
   return payload.roster
@@ -234,14 +242,21 @@ export function buildDailyRows(
           date,
           pgc: row?.pgc ?? null,
           cc90: row?.cc90 ?? null,
+          impact: row?.impact ?? null,
           dod: weekOverWeek(row?.pgc, prev?.pgc),
         }
       })
+      const wtd = wtdByRep.get(r.name)
+      const dayImpact = series.reduce((sum, d) => sum + (d.impact ?? 0), 0)
+      const dayCc90 = series.reduce((sum, d) => sum + (d.cc90 ?? 0), 0)
       return {
         name: r.name,
         manager: r.manager,
         level: r.level,
         expectedPgc: expectedPgc(targetPgc, r.level, curves),
+        wtdPgc: wtd?.pgc ?? null,
+        wtdCc90: wtd?.cc90 ?? (dayCc90 > 0 ? dayCc90 : null),
+        wtdImpact: wtd?.impact ?? (dayImpact > 0 ? dayImpact : null),
         days: series,
       }
     })
@@ -278,6 +293,11 @@ export function formatBps(value: number | null | undefined): string {
   const bps = Math.round(value * 10000)
   const sign = bps > 0 ? '+' : ''
   return `${sign}${bps.toLocaleString('en-US')} bps`
+}
+
+export function formatImpact(n: number | null | undefined): string {
+  if (n == null) return '—'
+  return n.toLocaleString('en-US')
 }
 
 export function formatWeek(iso: string): string {

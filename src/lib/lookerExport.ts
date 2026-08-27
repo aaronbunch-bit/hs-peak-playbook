@@ -9,7 +9,7 @@ import type { LookerFact, Slice, WeeklyRow } from './types'
  * CSV has two header rows:
  *   1. Audience groups (HS-STEM ×3, K12 Test Prep ×3)
  *   2. Field names (Week, Super Group, Consultant, Manager,
- *      CC90 / pGC / CC90 Mix for each audience, Total pGC)
+ *      CC90 / Closed Client Count / pGC / CC90 Mix for each audience, Total pGC)
  *
  * Total pGC is the volume-weighted blend of HS-STEM and K12 Test Prep
  * for that person-week. That is Supergroup pGC — there is no separate
@@ -126,9 +126,11 @@ type Cols = {
   name: number
   manager: number
   hsCc90: number
+  hsImpact: number
   hsPgc: number
   hsMix: number
   k12Cc90: number
+  k12Impact: number
   k12Pgc: number
   k12Mix: number
   totalPgc: number
@@ -140,24 +142,28 @@ const VIS_COLS: Cols = {
   name: 2,
   manager: 3,
   hsCc90: 4,
+  hsImpact: -1,
   hsPgc: 5,
   hsMix: 6,
   k12Cc90: 7,
+  k12Impact: -1,
   k12Pgc: 8,
   k12Mix: 9,
   totalPgc: 10,
 }
 
-/** Raw query CSV includes Closed Client Count between CC90 and pGC for each audience. */
+/** Raw query CSV includes Closed Client Count (client impact) between CC90 and pGC for each audience. */
 const RAW_COLS: Cols = {
   week: 0,
   superGroup: 1,
   name: 2,
   manager: 3,
   hsCc90: 4,
+  hsImpact: 5,
   hsPgc: 6,
   hsMix: 7,
   k12Cc90: 8,
+  k12Impact: 9,
   k12Pgc: 10,
   k12Mix: 11,
   totalPgc: 12,
@@ -169,21 +175,33 @@ function layoutFromHeader(rows: string[][]): Cols {
   return VIS_COLS
 }
 
+function impactCount(raw: string | undefined, pgc: number | null, cc90: number, col: number): number {
+  if (col >= 0) return parseCount(raw ?? '')
+  if (pgc == null || cc90 <= 0) return 0
+  return Math.round(pgc * cc90)
+}
+
 function rowToFact(cols: string[], layout: Cols): LookerFact | null {
   const week = (cols[layout.week] ?? '').trim().slice(0, 10)
   const name = (cols[layout.name] ?? '').trim()
   if (!week || !name || !/^\d{4}-\d{2}-\d{2}$/.test(week)) return null
+  const hsPgc = parsePgc(cols[layout.hsPgc] ?? '')
+  const k12Pgc = parsePgc(cols[layout.k12Pgc] ?? '')
+  const hsCc90 = parseCount(cols[layout.hsCc90] ?? '')
+  const k12Cc90 = parseCount(cols[layout.k12Cc90] ?? '')
   return {
     week,
     superGroup: (cols[layout.superGroup] ?? '').trim() || null,
     name,
     manager: canonicalManager((cols[layout.manager] ?? '').trim() || null),
-    hsCc90: parseCount(cols[layout.hsCc90] ?? ''),
-    hsPgc: parsePgc(cols[layout.hsPgc] ?? ''),
+    hsCc90,
+    hsPgc,
     hsMix: parsePgc(cols[layout.hsMix] ?? ''),
-    k12Cc90: parseCount(cols[layout.k12Cc90] ?? ''),
-    k12Pgc: parsePgc(cols[layout.k12Pgc] ?? ''),
+    hsImpact: impactCount(cols[layout.hsImpact], hsPgc, hsCc90, layout.hsImpact),
+    k12Cc90,
+    k12Pgc,
     k12Mix: parsePgc(cols[layout.k12Mix] ?? ''),
+    k12Impact: impactCount(cols[layout.k12Impact], k12Pgc, k12Cc90, layout.k12Impact),
     totalPgc: parsePgc(cols[layout.totalPgc] ?? ''),
   }
 }
@@ -209,13 +227,21 @@ export function parseLookerPlaybook(input: string | string[][]): LookerFact[] {
   return out
 }
 
+export function impliedImpact(pgc: number | null | undefined, cc90: number | null | undefined, impact?: number | null): number {
+  if (impact != null) return impact
+  if (pgc == null || cc90 == null || cc90 <= 0) return 0
+  return Math.round(pgc * cc90)
+}
+
 export function projectFact(
   fact: LookerFact,
   slice: Slice,
-): { pgc: number | null; cc90: number; mix: number | null } {
-  if (slice === 'hs-stem') return { pgc: fact.hsPgc, cc90: fact.hsCc90, mix: fact.hsMix }
-  if (slice === 'k12tp') return { pgc: fact.k12Pgc, cc90: fact.k12Cc90, mix: fact.k12Mix }
-  return { pgc: fact.totalPgc, cc90: fact.hsCc90 + fact.k12Cc90, mix: fact.hsMix }
+): { pgc: number | null; cc90: number; mix: number | null; impact: number } {
+  const hsImpact = impliedImpact(fact.hsPgc, fact.hsCc90, fact.hsImpact)
+  const k12Impact = impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
+  if (slice === 'hs-stem') return { pgc: fact.hsPgc, cc90: fact.hsCc90, mix: fact.hsMix, impact: hsImpact }
+  if (slice === 'k12tp') return { pgc: fact.k12Pgc, cc90: fact.k12Cc90, mix: fact.k12Mix, impact: k12Impact }
+  return { pgc: fact.totalPgc, cc90: fact.hsCc90 + fact.k12Cc90, mix: fact.hsMix, impact: hsImpact + k12Impact }
 }
 
 export function factHasSlice(fact: LookerFact, slice: Slice): boolean {
@@ -224,7 +250,7 @@ export function factHasSlice(fact: LookerFact, slice: Slice): boolean {
 }
 
 export function factToWeekly(fact: LookerFact, slice: Slice): WeeklyRow | null {
-  const { pgc, cc90, mix } = projectFact(fact, slice)
+  const { pgc, cc90, mix, impact } = projectFact(fact, slice)
   if (pgc == null && cc90 <= 0) return null
   if (pgc == null) return null
   return {
@@ -232,6 +258,7 @@ export function factToWeekly(fact: LookerFact, slice: Slice): WeeklyRow | null {
     rep: fact.name,
     pgc,
     cc90,
+    impact,
     mix,
     hsCc90: fact.hsCc90,
     hsPgc: fact.hsPgc,

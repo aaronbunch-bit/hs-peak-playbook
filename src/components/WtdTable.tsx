@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   comparePgcNullsLast,
   formatBps,
+  formatImpact,
   formatPgc,
   formatWeek,
   formatWeekday,
@@ -62,7 +63,9 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
   const defaultDay = days.at(-1) ?? 'name'
   const [sortKey, setSortKey] = useState<SortKey>(defaultDay)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-  const activeKey = days.includes(sortKey) || sortKey === 'name' || sortKey === 'manager' ? sortKey : defaultDay
+  const rollupKeys = sortKey === 'wtd' || sortKey === 'impact'
+  const activeKey =
+    days.includes(sortKey) || sortKey === 'name' || sortKey === 'manager' || rollupKeys ? sortKey : defaultDay
 
   const onSort = (key: SortKey) => {
     if (key === activeKey) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
@@ -80,6 +83,14 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
         const bv = activeKey === 'name' ? b.name : (b.manager ?? '')
         const cmp = av.localeCompare(bv)
         return cmp === 0 ? a.name.localeCompare(b.name) : dir * cmp
+      }
+      if (activeKey === 'wtd') {
+        const cmp = comparePgcNullsLast(a.wtdPgc, b.wtdPgc, sortDir)
+        return cmp === 0 ? a.name.localeCompare(b.name) : cmp
+      }
+      if (activeKey === 'impact') {
+        const cmp = comparePgcNullsLast(a.wtdImpact, b.wtdImpact, sortDir)
+        return cmp === 0 ? a.name.localeCompare(b.name) : cmp
       }
       const cmp = comparePgcNullsLast(pgcOnDate(a, activeKey), pgcOnDate(b, activeKey), sortDir)
       return cmp === 0 ? a.name.localeCompare(b.name) : cmp
@@ -101,6 +112,18 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
                   active={activeKey === 'manager'}
                   dir={sortDir}
                   onClick={() => onSort('manager')}
+                />
+              </th>
+              <th className="border-l border-white/10 px-3 py-3 text-right font-medium">
+                <SortBtn label="WTD" active={activeKey === 'wtd'} dir={sortDir} align="right" onClick={() => onSort('wtd')} />
+              </th>
+              <th className="px-3 py-3 text-right font-medium">
+                <SortBtn
+                  label="Impact WTD"
+                  active={activeKey === 'impact'}
+                  dir={sortDir}
+                  align="right"
+                  onClick={() => onSort('impact')}
                 />
               </th>
               {days.map((date) => (
@@ -135,6 +158,22 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
                     </div>
                   </td>
                   <td className="w-px whitespace-nowrap px-3 py-3 text-slate-600">{row.manager ?? '—'}</td>
+                  <td className="border-l border-slate-100 px-3 py-3 text-right">
+                    <div className="flex flex-col items-end gap-0.5">
+                      <PgcStatus
+                        value={row.wtdPgc}
+                        atTarget={row.wtdPgc != null && row.wtdPgc >= row.expectedPgc}
+                        expected={row.expectedPgc}
+                        level={row.level}
+                        targetPgc={targetPgc}
+                        lcCurves={lcCurves}
+                      />
+                      <div className="text-[10px] text-slate-400">
+                        {row.wtdCc90 == null ? '—' : `${row.wtdCc90.toLocaleString()} cc90`}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-700">{formatImpact(row.wtdImpact)}</td>
                   {row.days.map((day) => (
                     <td key={day.date} className="px-3 py-3 text-right">
                       <div className="flex flex-col items-end gap-0.5">
@@ -158,7 +197,7 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={Math.max(days.length + 2, 3)} className="px-5 py-12 text-center text-slate-500">
+                <td colSpan={Math.max(days.length + 4, 5)} className="px-5 py-12 text-center text-slate-500">
                   No High School reps with {sliceLabel} volume this week.
                 </td>
               </tr>
@@ -167,8 +206,9 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
         </table>
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-        Click a day to sort by that day’s pGC. Blanks stay at the bottom in both directions. WTD is this Sunday
-        through today. DoD is that day’s pGC minus the prior calendar day (bps). Empty days are —.
+        Click a day to sort by that day’s pGC. WTD is this Sunday through today; Impact WTD is Closed Client Count
+        for the same window. Blanks stay at the bottom in both directions. DoD is that day’s pGC minus the prior
+        calendar day (bps). Empty days are —.
       </p>
     </div>
   )

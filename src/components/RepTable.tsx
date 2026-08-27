@@ -1,10 +1,10 @@
-import { formatBps, formatPgc, formatWeek } from '../lib/pacer'
+import { formatBps, formatImpact, formatPgc, formatWeek } from '../lib/pacer'
 import { SLICE_SHORT } from '../lib/slices'
 import type { LcCurves } from '../lib/settings'
 import type { RepRow, Slice } from '../lib/types'
 import { PgcStatus } from './PgcStatus'
 
-export type SortKey = 'name' | 'manager' | 'pgc' | 'wtdPgc' | 'deltaWow'
+export type SortKey = 'name' | 'manager' | 'pgc' | 'impact' | 'deltaWow'
 
 type Props = {
   rows: RepRow[]
@@ -111,11 +111,11 @@ export function RepTable({
               </th>
               <th className="px-3 py-3 text-right font-medium">
                 <SortBtn
-                  label="WTD"
-                  active={sortKey === 'wtdPgc'}
+                  label="Impact"
+                  active={sortKey === 'impact'}
                   dir={sortDir}
                   align="right"
-                  onClick={() => onSort('wtdPgc')}
+                  onClick={() => onSort('impact')}
                 />
               </th>
               <th className="px-4 py-3 text-right font-medium sm:px-5">
@@ -219,26 +219,8 @@ export function RepTable({
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-right">
-                    <div className="flex flex-col items-end gap-0.5">
-                      <PgcStatus
-                        value={row.wtdPgc}
-                        atTarget={row.wtdAtTarget}
-                        expected={row.expectedPgc}
-                        level={row.level}
-                        targetPgc={targetPgc}
-                        lcCurves={lcCurves}
-                      />
-                      <div className="text-[10px] text-slate-400">
-                        {row.wtdPgc == null
-                          ? '—'
-                          : row.wtdCc90 == null
-                            ? 'cc90 —'
-                            : `${row.wtdCc90.toLocaleString()} cc90`}
-                        {row.wtdVsLast != null ? ' · ' : ''}
-                        {row.wtdVsLast != null && <Delta value={row.wtdVsLast} size="sm" />}
-                      </div>
-                    </div>
+                  <td className="px-3 py-3 text-right tabular-nums text-slate-700">
+                    {formatImpact(row.impact)}
                   </td>
                   <td className="px-4 py-3 text-right tabular-nums sm:px-5">
                     <Delta value={row.deltaWow} />
@@ -259,9 +241,9 @@ export function RepTable({
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         Green chips meet that rep’s LC bar. Blue means an LC1–3 is clearing the next LC’s bar. Rose is below
         their own LC. LC4 is the slice bar ({formatPgc(targetPgc)}). Deltas are in bps (100 bps = 1%). Team pGC is
-        CC90-weighted. WTD is this Sunday through today. Focus tags stack — marking one rep does not clear another.
-        Focus is for that calendar week and that audience (HS, K12, or SG). Hide removes a rep from this view until
-        you restore them.
+        CC90-weighted. Impact is Looker Closed Client Count for that week. Focus tags stack — marking one rep does
+        not clear another. Focus is for that calendar week and that audience (HS, K12, or SG). Hide removes a rep
+        from this view until you restore them.
       </p>
     </div>
   )
