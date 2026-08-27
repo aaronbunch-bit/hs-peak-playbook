@@ -98,6 +98,33 @@ export type RoutingRangePayload = {
   emptyReason?: string
 }
 
+/** Look 26569: Manager = rep, Regional Director = manager. Today so far, Peak primary. */
+export type IntradayRow = {
+  name: string
+  manager: string | null
+  hsPgc: number | null
+  hsCc90: number
+  k12Pgc: number | null
+  k12Cc90: number
+  superPgc: number | null
+  superCc90: number
+}
+
+export type IntradayRepRow = IntradayRow & {
+  level: string | null
+  expectedHs: number
+  expectedK12: number
+  expectedSuper: number
+}
+
+export type IntradayPayload = {
+  source: string
+  asOf: string
+  rows: IntradayRow[]
+  empty?: boolean
+  emptyReason?: string
+}
+
 export type FocusLogEntry = {
   week: string
   rep: string

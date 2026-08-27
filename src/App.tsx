@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { IntradayTable } from './components/IntradayTable'
 import { FilterBar } from './components/FilterBar'
 import { FocusList } from './components/FocusList'
 import { KpiStrip } from './components/KpiStrip'
@@ -22,7 +23,8 @@ import {
 } from './lib/focus'
 import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
 import { readHash, staffingAllowed, weekCursorFromHash, writeHash, type AppTab } from './lib/hash'
-import { fetchPacerData, fetchRoutingData, SLICE_LOOKER_FILTERS } from './lib/looker'
+import { fetchIntradayData, fetchPacerData, fetchRoutingData, SLICE_LOOKER_FILTERS } from './lib/looker'
+import { buildIntradayRows } from './lib/intraday'
 import { buildDailyRows, buildRows, formatDateRange, formatWeek, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
 import {
   applyRosterLevels,
@@ -36,7 +38,7 @@ import { suggestFocuses } from './lib/suggest'
 import { ROUTING_GROUP_META, ROUTING_OVERALL_META } from './data/routingGroups'
 import { buildRoutingRows, routingGroupStats, type RoutingRepRow } from './lib/routing'
 import { clampRange, rangeForRoutingPeriod } from './lib/routingRange'
-import type { Cohort, PacerPayload, RepRow, RoutingFact, RoutingGroup, RoutingPeriod, Slice, Staffing } from './lib/types'
+import type { Cohort, IntradayPayload, IntradayRepRow, PacerPayload, RepRow, RoutingFact, RoutingGroup, RoutingPeriod, Slice, Staffing } from './lib/types'
 
 function syntheticRepRow(row: RoutingRepRow): RepRow {
   return {
@@ -51,6 +53,29 @@ function syntheticRepRow(row: RoutingRepRow): RepRow {
     deltaWow: null,
     trend: null,
     atTarget: row.pgc != null && row.pgc >= row.expectedPgc,
+    wtdPgc: null,
+    wtdCc90: null,
+    wtdImpact: null,
+    wtdVsLast: null,
+    wtdAtTarget: false,
+    weeks: [],
+    focusHistory: [],
+  }
+}
+
+function syntheticIntradayRow(row: IntradayRepRow): RepRow {
+  return {
+    name: row.name,
+    level: row.level,
+    manager: row.manager,
+    pgc: row.superPgc,
+    cc90: row.superCc90,
+    impact: null,
+    mix: null,
+    expectedPgc: row.expectedSuper,
+    deltaWow: null,
+    trend: null,
+    atTarget: row.superPgc != null && row.superPgc >= row.expectedSuper,
     wtdPgc: null,
     wtdCc90: null,
     wtdImpact: null,
@@ -88,6 +113,8 @@ export default function App() {
   const [routingFacts, setRoutingFacts] = useState<RoutingFact[]>([])
   const [routingLoading, setRoutingLoading] = useState(false)
   const [routingError, setRoutingError] = useState<string | null>(null)
+  const [intraday, setIntraday] = useState<IntradayPayload | null>(null)
+  const [intradayLoading, setIntradayLoading] = useState(false)
 
   const focusWeek = sundayWeekStart()
   const targetPgc = targetForSlice(slice, settings.targets)
@@ -135,8 +162,11 @@ export default function App() {
     const names = new Set(
       (livePayload?.roster ?? []).map((r) => r.manager).filter((name): name is string => Boolean(name)),
     )
+    for (const row of intraday?.rows ?? []) {
+      if (row.manager) names.add(row.manager)
+    }
     return [...names].sort((a, b) => a.localeCompare(b))
-  }, [livePayload])
+  }, [livePayload, intraday])
 
   useEffect(() => {
     const onPlaybook = tab === 'playbook'
@@ -210,6 +240,26 @@ export default function App() {
       cancelled = true
     }
   }, [tab, routingStart, routingEnd, reload])
+
+  useEffect(() => {
+    if (tab !== 'intraday') return
+    let cancelled = false
+    setIntradayLoading(true)
+    fetchIntradayData()
+      .then((data) => {
+        if (cancelled) return
+        setIntraday(data)
+        setIntradayLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setIntraday(null)
+        setIntradayLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [tab, reload])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -313,6 +363,11 @@ export default function App() {
     })
   }, [livePayload, focus, targetPgc, staffing, settings.lcCurves])
 
+  const intradayRows = useMemo(() => {
+    const built = buildIntradayRows(intraday?.rows ?? [], livePayload?.roster ?? [], settings.targets, settings.lcCurves)
+    return manager ? built.filter((r) => r.manager === manager) : built
+  }, [intraday, livePayload, settings.targets, settings.lcCurves, manager])
+
   const lastFocusMap = useMemo(() => {
     const map = new Map<string, string | null>()
     for (const row of [...visibleRows, ...catalogRows]) {
@@ -370,13 +425,18 @@ export default function App() {
       .filter((item) => !manager || item.manager === manager)
   }, [catalogRows, livePayload, focus, focusWeek, notes, manager])
 
+  const selectedIntraday = intradayRows.find((r) => r.name === selected) ?? null
   const selectedRouting = routingDetailRows.find((r) => r.name === selected) ?? null
   const selectedRow =
     tab === 'routing'
       ? selectedRouting
         ? (catalogRows.find((r) => r.name === selectedRouting.name) ?? syntheticRepRow(selectedRouting))
         : null
-      : (rows.find((r) => r.name === selected) ?? catalogRows.find((r) => r.name === selected) ?? null)
+      : tab === 'intraday'
+        ? selectedIntraday
+          ? (catalogRows.find((r) => r.name === selectedIntraday.name) ?? syntheticIntradayRow(selectedIntraday))
+          : null
+        : (rows.find((r) => r.name === selected) ?? catalogRows.find((r) => r.name === selected) ?? null)
   const closedKpis = weekKpis(visibleRows, thatWeekFocusSet)
   const lastClosedFocusSet = useMemo(
     () => new Set(selectedWeek ? namesForWeek(focus, selectedWeek, slice) : []),
@@ -531,6 +591,30 @@ export default function App() {
                     ? ROUTING_OVERALL_META.label
                     : (ROUTING_GROUP_META.find((m) => m.id === routingGroup)?.label ?? routingGroup)
                 }
+                onSelect={setSelected}
+              />
+            )}
+          </>
+        ) : tab === 'intraday' ? (
+          <>
+            {intradayLoading && !intraday ? (
+              <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">Loading today…</p>
+            ) : intraday?.empty ? (
+              <div className="mx-auto max-w-6xl px-4 sm:px-6">
+                <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
+                  <p className="text-lg font-semibold text-slate-800">Intraday pGC</p>
+                  <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{intraday.emptyReason}</p>
+                </div>
+              </div>
+            ) : (
+              <IntradayTable
+                rows={intradayRows}
+                selected={selected}
+                asOf={intraday?.asOf ?? ''}
+                targetHs={targetForSlice('hs-stem', settings.targets)}
+                targetK12={targetForSlice('k12tp', settings.targets)}
+                targetSuper={targetForSlice('supergroup', settings.targets)}
+                lcCurves={settings.lcCurves}
                 onSelect={setSelected}
               />
             )}

@@ -1,11 +1,12 @@
 import { addDays, daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName, lookerRepNameFilter, overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
+import { emptyIntraday, parseIntradayCsv } from './intraday'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
-import type { DailyRow, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
+import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
 const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
 const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
@@ -83,12 +84,20 @@ async function runSavedLook(token: string): Promise<string> {
   return res.text()
 }
 
-async function lookQuery(token: string): Promise<LookerQuery> {
-  const lookRes = await lookerFetch(token, `/looks/${lookId()}?fields=query`)
+function intradayLookId(): string {
+  return env('LOOKER_INTRADAY_LOOK_ID') || '26569'
+}
+
+async function lookQueryFor(token: string, id: string): Promise<LookerQuery> {
+  const lookRes = await lookerFetch(token, `/looks/${id}?fields=query`)
   if (!lookRes.ok) throw new Error(`Looker look metadata failed (${lookRes.status})`)
   const look = (await lookRes.json()) as { query?: LookerQuery }
   if (!look.query) throw new Error('Looker look has no query')
   return look.query
+}
+
+async function lookQuery(token: string): Promise<LookerQuery> {
+  return lookQueryFor(token, lookId())
 }
 
 type QueryExtra = {
@@ -277,6 +286,53 @@ export function payloadFromFacts(
   }
 }
 
+async function runIntradayCsv(token: string, query: LookerQuery): Promise<string> {
+  const filters: Record<string, string> = { ...(query.filters ?? {}) }
+  delete filters['employee_directory.rd_name']
+  filters['employee_directory.mgr_name'] = lookerRepNameFilter()
+  filters['call_view.call_created_at_date'] = 'today'
+  filters['contact_audience_subject_calls.audience_subject'] = 'HS-STEM,K12 Test Prep'
+  const res = await lookerFetch(token, '/queries/run/csv', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: query.model,
+      view: query.view,
+      fields: [
+        'employee_directory.mgr_name',
+        'employee_directory.rd_name',
+        'contact_audience_subject_calls.audience_subject',
+        'call_view.cc90_count',
+        'call_view.cc90_with_sale_count',
+      ],
+      filters,
+      sorts: ['employee_directory.mgr_name'],
+      limit: '5000',
+      dynamic_fields: query.dynamic_fields,
+      query_timezone: query.query_timezone,
+    }),
+  })
+  if (!res.ok) throw new Error(`Looker intraday query failed (${res.status})`)
+  return res.text()
+}
+
+export async function fetchLookerIntraday(): Promise<IntradayPayload> {
+  if (!lookerConfigured()) {
+    return emptyIntraday('Looker is not configured. Set LOOKER_CLIENT_ID and LOOKER_CLIENT_SECRET.')
+  }
+  const token = await login()
+  const query = await lookQueryFor(token, intradayLookId())
+  const rows = parseIntradayCsv(await runIntradayCsv(token, query))
+  if (rows.length === 0) {
+    return emptyIntraday('No Peak primary people with HS/K12 CC90 yet today.')
+  }
+  return {
+    source: `Looker look ${intradayLookId()} · Peak primary`,
+    asOf: toIsoDate(new Date()),
+    rows,
+  }
+}
+
 export async function fetchLookerRouting(from: string, to: string): Promise<RoutingRangePayload> {
   const range = clampRange(from, to)
   if (!lookerConfigured()) {
@@ -375,6 +431,9 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
   }
 
   try {
+    if (url.searchParams.get('view') === 'intraday') {
+      return Response.json(await fetchLookerIntraday())
+    }
     const from = url.searchParams.get('from')
     const to = url.searchParams.get('to')
     if (from && to) {
@@ -385,6 +444,9 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
     return Response.json(payload, { status: payload.empty ? 200 : 200 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Looker request failed'
+    if (url.searchParams.get('view') === 'intraday') {
+      return Response.json(emptyIntraday(message))
+    }
     const from = url.searchParams.get('from')
     const to = url.searchParams.get('to')
     if (from && to) {

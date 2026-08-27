@@ -5,7 +5,8 @@ import { factHasSlice, factToWeekly } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
-import type { PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
+import { emptyIntraday } from './intraday'
+import type { IntradayPayload, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
 export { emptyPayload, SLICE_LOOKER_FILTERS }
 
@@ -110,6 +111,30 @@ export async function fetchRoutingData(start: string, end: string): Promise<Rout
   const inRange = seed.facts.filter((f) => f.week >= range.start && f.week <= range.end)
   const facts = inRange.length ? inRange : seed.facts
   return { ...range, facts: factsToRouting(facts) }
+}
+
+export async function fetchIntradayData(): Promise<IntradayPayload> {
+  try {
+    const headers: HeadersInit = {}
+    const token = await getSiteAccessToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetch(`/.netlify/functions/looker?view=intraday`, { headers })
+    if (res.status === 401 || res.status === 403) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      return emptyIntraday(body.error ?? 'Sign in with Google to load playbook data.')
+    }
+    if (res.ok) {
+      const data = (await res.json()) as IntradayPayload
+      if (Array.isArray(data.rows)) return data
+    }
+  } catch {
+    // Local Vite uses the Looker proxy; if it is down there is no seed for this look.
+  }
+
+  if (import.meta.env.PROD) {
+    return emptyIntraday('Looker did not return today. Refresh after sign-in, or check Netlify env vars.')
+  }
+  return emptyIntraday('Looker did not return today. Start Vite with Looker credentials to load Intraday.')
 }
 
 export { factHasSlice }

@@ -125,6 +125,15 @@ export function FilterBar({
               <button
                 type="button"
                 className="nav-tab"
+                data-on={tab === 'intraday'}
+                title="Today so far · Peak primary · HS, K12, and Super"
+                onClick={() => onTab('intraday')}
+              >
+                Intraday
+              </button>
+              <button
+                type="button"
+                className="nav-tab"
                 data-on={tab === 'routing'}
                 title="HS-STEM and K12 Test Prep volume by staffing pool, not just Peak"
                 onClick={() => onTab('routing')}
@@ -277,6 +286,31 @@ export function FilterBar({
                 </button>
               )}
             </div>
+          </div>
+        )}
+
+        {tab === 'intraday' && (
+          <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
+            <Field label="Window">
+              <span className="h-[30px] inline-flex items-center rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800">
+                Today so far
+              </span>
+            </Field>
+            <Field label="Manager">
+              <select
+                value={manager ?? ''}
+                onChange={(e) => onManager(e.target.value || null)}
+                className="h-[30px] rounded-lg bg-white px-2.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200/90"
+              >
+                <option value="">All managers</option>
+                {managers.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <p className="pb-1 text-xs text-slate-500">Peak primary · HS, K12, and Super on one row.</p>
           </div>
         )}
 

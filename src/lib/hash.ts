@@ -13,7 +13,7 @@ import {
 } from './types'
 import { periodMatchingRange, rangeForRoutingPeriod } from './routingRange'
 
-export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus' | 'routing'
+export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus' | 'routing' | 'intraday'
 
 export type HashState = {
   slice: Slice
@@ -56,7 +56,7 @@ function isStaffing(v: string | null): v is Staffing {
 
 function parseTab(v: string | null): AppTab {
   if (v === 'yesterday' || v === 'audience' || v === 'routing') return 'routing'
-  if (v === 'playbook' || v === 'wtd' || v === 'roster' || v === 'focus') return v
+  if (v === 'playbook' || v === 'wtd' || v === 'roster' || v === 'focus' || v === 'intraday') return v
   return DEFAULT.tab
 }
 
