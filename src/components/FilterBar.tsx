@@ -104,8 +104,14 @@ export function FilterBar({
               <button type="button" className="nav-tab" data-on={tab === 'playbook' || tab === 'wtd'} onClick={() => onTab('playbook')}>
                 Playbook
               </button>
-              <button type="button" className="nav-tab" data-on={tab === 'yesterday'} onClick={() => onTab('yesterday')}>
-                Yesterday
+              <button
+                type="button"
+                className="nav-tab"
+                data-on={tab === 'routing'}
+                title="HS-STEM and K12 Test Prep volume by staffing pool, not just Peak"
+                onClick={() => onTab('routing')}
+              >
+                Routing
               </button>
               <button type="button" className="nav-tab" data-on={tab === 'focus'} onClick={() => onTab('focus')}>
                 Focus
@@ -256,7 +262,7 @@ export function FilterBar({
           </div>
         )}
 
-        {tab === 'yesterday' && (
+        {tab === 'routing' && (
           <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
             <Field label="Audience">
               <Seg>

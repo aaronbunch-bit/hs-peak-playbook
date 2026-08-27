@@ -131,7 +131,7 @@ export default function App() {
   )
 
   const managers = useMemo(() => {
-    if (tab === 'yesterday') {
+    if (tab === 'routing') {
       const names = new Set(
         routingRowsAll.map((r) => r.manager).filter((name): name is string => Boolean(name)),
       )
@@ -166,7 +166,7 @@ export default function App() {
       setStaffing(next.staffing)
       setManager(next.manager)
       setTab(next.tab === 'wtd' ? 'playbook' : next.tab)
-      if (next.tab !== 'yesterday') {
+      if (next.tab !== 'routing') {
         setWeekCursor(weekCursorFromHash(next.tab, next.week, payload?.weeks ?? []))
       }
       setRoutingPeriod(next.routingPeriod)
@@ -350,7 +350,7 @@ export default function App() {
 
   const selectedRouting = routingDetailRows.find((r) => r.name === selected) ?? null
   const selectedRow =
-    tab === 'yesterday'
+    tab === 'routing'
       ? selectedRouting
         ? (catalogRows.find((r) => r.name === selectedRouting.name) ?? syntheticRepRow(selectedRouting))
         : null
@@ -490,11 +490,11 @@ export default function App() {
             onHide={onHideRep}
             onShow={onShowRep}
           />
-        ) : tab === 'yesterday' ? (
+        ) : tab === 'routing' ? (
           <>
             <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">
-              Each block is clients sold in the bucket ÷ that bucket’s HS/K12 cc90 — not an average of
-              averages. Click a group for the person list.
+              All HS-STEM and K12 Test Prep volume — not just Peak. Each block is clients sold ÷ that
+              bucket’s cc90, not an average of averages. Click a group for the person list.
             </p>
             <RoutingBlocks
               stats={routingStats}

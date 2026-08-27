@@ -11,7 +11,7 @@ import {
   type Staffing,
 } from './types'
 
-export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus' | 'yesterday'
+export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus' | 'routing'
 
 export type HashState = {
   slice: Slice
@@ -48,8 +48,10 @@ function isStaffing(v: string | null): v is Staffing {
   return !!v && (STAFFINGS as readonly string[]).includes(v)
 }
 
-function isTab(v: string | null): v is AppTab {
-  return v === 'playbook' || v === 'wtd' || v === 'roster' || v === 'focus' || v === 'yesterday'
+function parseTab(v: string | null): AppTab {
+  if (v === 'yesterday' || v === 'audience' || v === 'routing') return 'routing'
+  if (v === 'playbook' || v === 'wtd' || v === 'roster' || v === 'focus') return v
+  return DEFAULT.tab
 }
 
 function isRoutingPeriod(v: string | null): v is RoutingPeriod {
@@ -81,7 +83,7 @@ export function readHash(): HashState {
     cohort: isCohort(cohortParam) ? cohortParam : DEFAULT.cohort,
     staffing: staffingAllowed(slice) && isStaffing(staffingRaw) ? staffingRaw : 'primary',
     manager,
-    tab: isTab(tabParam) ? tabParam : DEFAULT.tab,
+    tab: parseTab(tabParam),
     week: params.get('week'),
     routingPeriod: isRoutingPeriod(periodParam) ? periodParam : DEFAULT.routingPeriod,
     routingGroup: isRoutingGroup(groupParam) ? groupParam : null,
@@ -98,7 +100,7 @@ export function writeHash(state: HashState): void {
     params.set('staffing', state.staffing)
   }
   if (state.week) params.set('week', state.week)
-  if (state.tab === 'yesterday') {
+  if (state.tab === 'routing') {
     if (state.routingPeriod !== 'yesterday') params.set('period', state.routingPeriod)
     if (state.routingGroup) params.set('group', state.routingGroup)
   }
