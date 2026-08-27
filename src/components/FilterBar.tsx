@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import type { Cohort, RoutingPeriod, Slice, Staffing } from '../lib/types'
 import { staffingAllowed, type AppTab } from '../lib/hash'
-import { formatPgc, formatWeek, formatWeekRange } from '../lib/pacer'
+import { addDays, toIsoDate } from '../lib/calendar'
+import { formatDateRange, formatPgc, formatWeek } from '../lib/pacer'
 import { targetForSlice, type Targets } from '../lib/settings'
 
 const SLICES: { id: Slice; label: string }[] = [
@@ -15,6 +16,16 @@ const COHORTS: { id: Cohort; label: string }[] = [
   { id: 'lc1-3', label: 'LC1–3' },
   { id: 'lc4', label: 'LC4' },
 ]
+
+const ROUTING_PRESETS: { id: Exclude<RoutingPeriod, 'custom'>; label: string }[] = [
+  { id: 'yesterday', label: 'Yday' },
+  { id: 'wtd', label: 'WTD' },
+  { id: 'week', label: 'Last wk' },
+  { id: 'mtd', label: 'MTD' },
+]
+
+const DATE_INPUT =
+  'h-[30px] rounded-lg bg-white px-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200/90'
 
 type Props = {
   tab: AppTab
@@ -37,9 +48,10 @@ type Props = {
   onOpenSettings: () => void
   onRefresh: () => void
   routingPeriod?: RoutingPeriod
-  yesterdayDate?: string | null
-  lastWeekStart?: string | null
-  onRoutingPeriod?: (period: RoutingPeriod) => void
+  routingStart?: string
+  routingEnd?: string
+  onRoutingPeriod?: (period: Exclude<RoutingPeriod, 'custom'>) => void
+  onRoutingRange?: (start: string, end: string) => void
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -76,9 +88,10 @@ export function FilterBar({
   onOpenSettings,
   onRefresh,
   routingPeriod = 'yesterday',
-  yesterdayDate = null,
-  lastWeekStart = null,
+  routingStart,
+  routingEnd,
   onRoutingPeriod,
+  onRoutingRange,
 }: Props) {
   const showStaffing = staffingAllowed(slice)
   const wtdWeek = weekCursor === 0
@@ -88,6 +101,10 @@ export function FilterBar({
   const activeTarget = targetForSlice(slice, targets)
   const playbook = tab === 'playbook' || tab === 'wtd'
   const sliceShort = slice === 'hs-stem' ? 'HS' : slice === 'k12tp' ? 'K12' : 'SG'
+  const today = toIsoDate(new Date())
+  const minDate = addDays(today, -365)
+  const rangeStart = routingStart ?? today
+  const rangeEnd = routingEnd ?? today
 
   return (
     <header className="sticky top-0 z-20 border-b border-slate-200/70 bg-white/85 backdrop-blur-md">
@@ -282,32 +299,43 @@ export function FilterBar({
 
             <Field label="Period">
               <Seg>
-                <button
-                  type="button"
-                  className="seg-btn px-2.5 py-1 text-xs"
-                  data-on={routingPeriod === 'yesterday'}
-                  onClick={() => onRoutingPeriod?.('yesterday')}
-                >
-                  Yesterday
-                </button>
-                <button
-                  type="button"
-                  className="seg-btn px-2.5 py-1 text-xs"
-                  data-on={routingPeriod === 'week'}
-                  onClick={() => onRoutingPeriod?.('week')}
-                >
-                  Last week
-                </button>
+                {ROUTING_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className="seg-btn px-2.5 py-1 text-xs"
+                    data-on={routingPeriod === preset.id}
+                    onClick={() => onRoutingPeriod?.(preset.id)}
+                  >
+                    {preset.label}
+                  </button>
+                ))}
               </Seg>
-              <span className="text-[11px] text-slate-400">
-                {routingPeriod === 'week'
-                  ? lastWeekStart
-                    ? formatWeekRange(lastWeekStart)
-                    : 'Closed Sunday week'
-                  : yesterdayDate
-                    ? formatWeek(yesterdayDate)
-                    : 'Prior calendar day'}
-              </span>
+            </Field>
+
+            <Field label="Dates">
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  value={rangeStart}
+                  min={minDate}
+                  max={today}
+                  onChange={(e) => onRoutingRange?.(e.target.value, rangeEnd)}
+                  className={DATE_INPUT}
+                  aria-label="From date"
+                />
+                <span className="text-xs text-slate-400">–</span>
+                <input
+                  type="date"
+                  value={rangeEnd}
+                  min={minDate}
+                  max={today}
+                  onChange={(e) => onRoutingRange?.(rangeStart, e.target.value)}
+                  className={DATE_INPUT}
+                  aria-label="To date"
+                />
+              </div>
+              <span className="text-[11px] text-slate-400">{formatDateRange(rangeStart, rangeEnd)}</span>
             </Field>
 
             <Field label="Manager">

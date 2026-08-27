@@ -1,3 +1,4 @@
+import { isIsoDate } from './calendar'
 import {
   COHORTS,
   ROUTING_GROUPS,
@@ -10,6 +11,7 @@ import {
   type Slice,
   type Staffing,
 } from './types'
+import { periodMatchingRange, rangeForRoutingPeriod } from './routingRange'
 
 export type AppTab = 'playbook' | 'wtd' | 'roster' | 'focus' | 'routing'
 
@@ -22,6 +24,8 @@ export type HashState = {
   week: string | null
   routingPeriod: RoutingPeriod
   routingGroup: RoutingGroup | null
+  routingFrom: string
+  routingTo: string
 }
 
 const DEFAULT: HashState = {
@@ -33,6 +37,8 @@ const DEFAULT: HashState = {
   week: null,
   routingPeriod: 'yesterday',
   routingGroup: null,
+  routingFrom: '',
+  routingTo: '',
 }
 
 function isSlice(v: string | null): v is Slice {
@@ -67,6 +73,24 @@ export function staffingAllowed(_slice: Slice): boolean {
   return false
 }
 
+function routingFromHash(periodParam: string | null, fromParam: string | null, toParam: string | null) {
+  if (isIsoDate(fromParam) && isIsoDate(toParam)) {
+    const range = rangeForRoutingPeriod('custom', fromParam, toParam)
+    return {
+      routingPeriod: periodMatchingRange(range.start, range.end),
+      routingFrom: range.start,
+      routingTo: range.end,
+    }
+  }
+  const period = isRoutingPeriod(periodParam) ? periodParam : DEFAULT.routingPeriod
+  const range = rangeForRoutingPeriod(period, fromParam, toParam)
+  return {
+    routingPeriod: period === 'custom' ? periodMatchingRange(range.start, range.end) : period,
+    routingFrom: range.start,
+    routingTo: range.end,
+  }
+}
+
 export function readHash(): HashState {
   const raw = window.location.hash.replace(/^#/, '')
   const params = new URLSearchParams(raw)
@@ -76,7 +100,7 @@ export function readHash(): HashState {
   const staffingRaw = params.get('staffing')
   const manager = params.get('manager')?.trim() || null
   const tabParam = params.get('tab')
-  const periodParam = params.get('period')
+  const routing = routingFromHash(params.get('period'), params.get('from'), params.get('to'))
   const groupParam = params.get('group')
   return {
     slice,
@@ -85,8 +109,8 @@ export function readHash(): HashState {
     manager,
     tab: parseTab(tabParam),
     week: params.get('week'),
-    routingPeriod: isRoutingPeriod(periodParam) ? periodParam : DEFAULT.routingPeriod,
     routingGroup: isRoutingGroup(groupParam) ? groupParam : null,
+    ...routing,
   }
 }
 
@@ -102,6 +126,10 @@ export function writeHash(state: HashState): void {
   if (state.week) params.set('week', state.week)
   if (state.tab === 'routing') {
     if (state.routingPeriod !== 'yesterday') params.set('period', state.routingPeriod)
+    if (state.routingPeriod === 'custom') {
+      params.set('from', state.routingFrom)
+      params.set('to', state.routingTo)
+    }
     if (state.routingGroup) params.set('group', state.routingGroup)
   }
   const next = `#${params.toString()}`

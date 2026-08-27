@@ -9,7 +9,7 @@ import { RoutingBlocks } from './components/RoutingBlocks'
 import { RoutingTable } from './components/RoutingTable'
 import { SettingsPanel } from './components/SettingsPanel'
 import { WtdTable } from './components/WtdTable'
-import { lastCompleteWeekStart, sundayWeekStart, yesterday } from './lib/calendar'
+import { sundayWeekStart } from './lib/calendar'
 import {
   focusedThisWeek,
   historyFromStore,
@@ -22,8 +22,8 @@ import {
 } from './lib/focus'
 import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
 import { readHash, staffingAllowed, weekCursorFromHash, writeHash, type AppTab } from './lib/hash'
-import { fetchPacerData, SLICE_LOOKER_FILTERS } from './lib/looker'
-import { buildDailyRows, buildRows, formatWeek, formatWeekRange, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
+import { fetchPacerData, fetchRoutingData, SLICE_LOOKER_FILTERS } from './lib/looker'
+import { buildDailyRows, buildRows, formatDateRange, formatWeek, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
 import {
   applyRosterLevels,
   loadRosterLevels,
@@ -33,9 +33,10 @@ import {
 import { hideRep, loadHiddenReps, saveHiddenReps, showRep } from './lib/hidden'
 import { loadSettings, saveSettings, targetForSlice, type AppSettings } from './lib/settings'
 import { suggestFocuses } from './lib/suggest'
-import { ROUTING_GROUP_META } from './data/routingGroups'
+import { ROUTING_GROUP_META, ROUTING_OVERALL_META } from './data/routingGroups'
 import { buildRoutingRows, routingGroupStats, type RoutingRepRow } from './lib/routing'
-import type { Cohort, PacerPayload, RepRow, RoutingGroup, RoutingPeriod, Slice, Staffing } from './lib/types'
+import { clampRange, periodMatchingRange, rangeForRoutingPeriod } from './lib/routingRange'
+import type { Cohort, PacerPayload, RepRow, RoutingFact, RoutingGroup, RoutingPeriod, Slice, Staffing } from './lib/types'
 
 function syntheticRepRow(row: RoutingRepRow): RepRow {
   return {
@@ -80,6 +81,11 @@ export default function App() {
   const [reload, setReload] = useState(0)
   const [routingPeriod, setRoutingPeriod] = useState<RoutingPeriod>(initial.routingPeriod)
   const [routingGroup, setRoutingGroup] = useState<RoutingGroup | null>(initial.routingGroup)
+  const [routingStart, setRoutingStart] = useState(initial.routingFrom)
+  const [routingEnd, setRoutingEnd] = useState(initial.routingTo)
+  const [routingFacts, setRoutingFacts] = useState<RoutingFact[]>([])
+  const [routingLoading, setRoutingLoading] = useState(false)
+  const [routingError, setRoutingError] = useState<string | null>(null)
 
   const focusWeek = sundayWeekStart()
   const targetPgc = targetForSlice(slice, settings.targets)
@@ -97,20 +103,14 @@ export default function App() {
       })),
       daily: payload.daily ?? [],
       dailyDays: payload.dailyDays ?? [],
-      yesterdayDate: payload.yesterdayDate ?? yesterday(),
-      yesterdayFacts: payload.yesterdayFacts ?? [],
-      lastWeekStart: payload.lastWeekStart ?? lastCompleteWeekStart(),
-      lastWeekFacts: payload.lastWeekFacts ?? [],
     }
   }, [payload, rosterLevels])
 
   const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
 
   const routingRowsAll = useMemo(() => {
-    if (!livePayload) return []
-    const facts = routingPeriod === 'week' ? livePayload.lastWeekFacts : livePayload.yesterdayFacts
-    return buildRoutingRows(facts, slice, targetPgc, settings.lcCurves, livePayload.roster)
-  }, [livePayload, routingPeriod, slice, targetPgc, settings.lcCurves])
+    return buildRoutingRows(routingFacts, slice, targetPgc, settings.lcCurves, livePayload?.roster ?? [])
+  }, [routingFacts, livePayload, slice, targetPgc, settings.lcCurves])
 
   const routingRows = useMemo(
     () =>
@@ -124,11 +124,13 @@ export default function App() {
     () => ROUTING_GROUP_META.map((meta) => routingGroupStats(routingRows, meta.id)),
     [routingRows],
   )
+  const routingOverall = useMemo(() => routingGroupStats(routingRows, 'overall'), [routingRows])
 
-  const routingDetailRows = useMemo(
-    () => (routingGroup ? routingRows.filter((r) => r.routingGroup === routingGroup) : []),
-    [routingRows, routingGroup],
-  )
+  const routingDetailRows = useMemo(() => {
+    if (!routingGroup) return []
+    if (routingGroup === 'overall') return routingRows
+    return routingRows.filter((r) => r.routingGroup === routingGroup)
+  }, [routingRows, routingGroup])
 
   const managers = useMemo(() => {
     if (tab === 'routing') {
@@ -155,8 +157,10 @@ export default function App() {
       week: onPlaybook && weekCursor > 1 && selectedWeek ? selectedWeek : onPlaybook && weekCursor === 0 ? 'wtd' : null,
       routingPeriod,
       routingGroup,
+      routingFrom: routingStart,
+      routingTo: routingEnd,
     })
-  }, [slice, cohort, staffing, manager, tab, weekCursor, selectedWeek, routingPeriod, routingGroup])
+  }, [slice, cohort, staffing, manager, tab, weekCursor, selectedWeek, routingPeriod, routingGroup, routingStart, routingEnd])
 
   useEffect(() => {
     const onHash = () => {
@@ -171,6 +175,8 @@ export default function App() {
       }
       setRoutingPeriod(next.routingPeriod)
       setRoutingGroup(next.routingGroup)
+      setRoutingStart(next.routingFrom)
+      setRoutingEnd(next.routingTo)
     }
     window.addEventListener('hashchange', onHash)
     return () => window.removeEventListener('hashchange', onHash)
@@ -188,6 +194,29 @@ export default function App() {
       cancelled = true
     }
   }, [slice, staffing, reload])
+
+  useEffect(() => {
+    if (tab !== 'routing') return
+    let cancelled = false
+    setRoutingLoading(true)
+    setRoutingError(null)
+    fetchRoutingData(routingStart, routingEnd)
+      .then((data) => {
+        if (cancelled) return
+        setRoutingFacts(data.facts)
+        setRoutingError(data.empty ? (data.emptyReason ?? 'No rows for this range.') : null)
+        setRoutingLoading(false)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setRoutingFacts([])
+        setRoutingError('Could not load this date range.')
+        setRoutingLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [tab, routingStart, routingEnd, reload])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -423,6 +452,20 @@ export default function App() {
   const onShowRep = (name: string) => persistHidden(showRep(hiddenReps, name))
   const onRestoreHidden = () => persistHidden([])
 
+  const applyRoutingPreset = (period: Exclude<RoutingPeriod, 'custom'>) => {
+    const range = rangeForRoutingPeriod(period)
+    setRoutingPeriod(period)
+    setRoutingStart(range.start)
+    setRoutingEnd(range.end)
+  }
+
+  const applyRoutingRange = (start: string, end: string) => {
+    const range = clampRange(start, end)
+    setRoutingStart(range.start)
+    setRoutingEnd(range.end)
+    setRoutingPeriod(periodMatchingRange(range.start, range.end))
+  }
+
   return (
     <div className="min-h-svh pb-16">
       <FilterBar
@@ -454,13 +497,52 @@ export default function App() {
         onOpenSettings={() => setSettingsOpen(true)}
         onRefresh={() => setReload((n) => n + 1)}
         routingPeriod={routingPeriod}
-        yesterdayDate={livePayload?.yesterdayDate ?? yesterday()}
-        lastWeekStart={livePayload?.lastWeekStart ?? lastCompleteWeekStart()}
-        onRoutingPeriod={setRoutingPeriod}
+        routingStart={routingStart}
+        routingEnd={routingEnd}
+        onRoutingPeriod={applyRoutingPreset}
+        onRoutingRange={applyRoutingRange}
       />
 
       <main className="mt-4 space-y-4">
-        {!livePayload || livePayload.slice !== slice ? (
+        {tab === 'routing' ? (
+          <>
+            <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">
+              All HS-STEM and K12 Test Prep volume — not just Peak. Each block is clients sold ÷ that
+              bucket’s cc90, not an average of averages. Click a group for the person list.
+              {routingLoading ? ' Loading range…' : ''}
+            </p>
+            {routingError && !routingLoading ? (
+              <p className="mx-auto max-w-6xl px-4 text-sm text-amber-700 sm:px-6">{routingError}</p>
+            ) : null}
+            <RoutingBlocks
+              stats={routingStats}
+              overall={routingOverall}
+              selected={routingGroup}
+              slice={slice}
+              loading={routingLoading}
+              onSelect={(group) => {
+                setRoutingGroup(group)
+                setSelected(null)
+              }}
+            />
+            {routingGroup && (
+              <RoutingTable
+                rows={routingDetailRows}
+                selected={selected}
+                slice={slice}
+                targetPgc={targetPgc}
+                lcCurves={settings.lcCurves}
+                periodLabel={formatDateRange(routingStart, routingEnd)}
+                groupLabel={
+                  routingGroup === 'overall'
+                    ? ROUTING_OVERALL_META.label
+                    : (ROUTING_GROUP_META.find((m) => m.id === routingGroup)?.label ?? routingGroup)
+                }
+                onSelect={setSelected}
+              />
+            )}
+          </>
+        ) : !livePayload || livePayload.slice !== slice ? (
           <div className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">Loading week…</div>
         ) : tab === 'focus' ? (
           livePayload.empty ? (
@@ -490,37 +572,6 @@ export default function App() {
             onHide={onHideRep}
             onShow={onShowRep}
           />
-        ) : tab === 'routing' ? (
-          <>
-            <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">
-              All HS-STEM and K12 Test Prep volume — not just Peak. Each block is clients sold ÷ that
-              bucket’s cc90, not an average of averages. Click a group for the person list.
-            </p>
-            <RoutingBlocks
-              stats={routingStats}
-              selected={routingGroup}
-              onSelect={(group) => {
-                setRoutingGroup(group)
-                setSelected(null)
-              }}
-            />
-            {routingGroup && (
-              <RoutingTable
-                rows={routingDetailRows}
-                selected={selected}
-                slice={slice}
-                targetPgc={targetPgc}
-                lcCurves={settings.lcCurves}
-                periodLabel={
-                  routingPeriod === 'week'
-                    ? formatWeekRange(livePayload.lastWeekStart)
-                    : formatWeek(livePayload.yesterdayDate)
-                }
-                groupLabel={ROUTING_GROUP_META.find((m) => m.id === routingGroup)?.label ?? routingGroup}
-                onSelect={setSelected}
-              />
-            )}
-          </>
         ) : livePayload.empty ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">

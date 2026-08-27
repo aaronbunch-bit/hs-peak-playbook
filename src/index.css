@@ -130,30 +130,27 @@ body::before {
 .routing-block {
   position: relative;
   overflow: hidden;
-  border-radius: 1.25rem;
-  padding: 1.5rem;
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
   text-align: left;
   background: #fff;
   border: 1px solid rgb(226 232 240 / 0.95);
-  box-shadow:
-    0 1px 2px rgb(15 23 42 / 0.05),
-    0 14px 32px rgb(15 23 42 / 0.06);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
   transition:
     transform 0.16s ease,
     box-shadow 0.16s ease;
 }
 
 .routing-block:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .routing-block::before {
   content: '';
   position: absolute;
   z-index: 1;
-  inset: 0 0 auto;
-  height: 4px;
-  background: linear-gradient(90deg, #e11d8a, #7c3aed, #38bdf8);
+  inset: 0 auto 0 0;
+  width: 4px;
 }
 
 .routing-block::after {
@@ -168,44 +165,78 @@ body::before {
   z-index: 1;
 }
 
+.routing-block[data-tone='overall']::before {
+  background: linear-gradient(180deg, #e11d8a, #7c3aed, #38bdf8);
+}
+.routing-block[data-tone='overall']::after {
+  background: radial-gradient(160px 90px at 100% 0%, rgb(124 58 237 / 0.12), transparent 70%);
+}
+.routing-block[data-tone='overall'][data-on='true'] {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #7c3aed;
+}
+
+.routing-block[data-tone='primary']::before {
+  background: linear-gradient(180deg, #be185d, #e11d8a);
+}
 .routing-block[data-tone='primary']::after {
-  background: radial-gradient(240px 160px at 100% -10%, rgb(225 29 138 / 0.18), transparent 68%);
+  background: radial-gradient(160px 90px at 100% 0%, rgb(225 29 138 / 0.16), transparent 70%);
+}
+.routing-block[data-tone='primary'][data-on='true'] {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #e11d8a;
 }
 
+.routing-block[data-tone='training']::before {
+  background: linear-gradient(180deg, #0284c7, #38bdf8);
+}
 .routing-block[data-tone='training']::after {
-  background: radial-gradient(240px 160px at 100% -10%, rgb(56 189 248 / 0.22), transparent 68%);
+  background: radial-gradient(160px 90px at 100% 0%, rgb(14 165 233 / 0.18), transparent 70%);
+}
+.routing-block[data-tone='training'][data-on='true'] {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #0ea5e9;
 }
 
+.routing-block[data-tone='cross-trained']::before {
+  background: linear-gradient(180deg, #6d28d9, #a855f7);
+}
 .routing-block[data-tone='cross-trained']::after {
-  background: radial-gradient(240px 160px at 100% -10%, rgb(124 58 237 / 0.18), transparent 68%);
+  background: radial-gradient(160px 90px at 100% 0%, rgb(168 85 247 / 0.18), transparent 70%);
+}
+.routing-block[data-tone='cross-trained'][data-on='true'] {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #a855f7;
 }
 
+.routing-block[data-tone='overflow']::before {
+  background: linear-gradient(180deg, #475569, #94a3b8);
+}
 .routing-block[data-tone='overflow']::after {
-  background:
-    radial-gradient(180px 120px at 92% -8%, rgb(225 29 138 / 0.08), transparent 70%),
-    radial-gradient(200px 140px at 100% 40%, rgb(56 189 248 / 0.1), transparent 72%);
+  background: radial-gradient(160px 90px at 100% 0%, rgb(100 116 139 / 0.14), transparent 70%);
 }
-
-.routing-block[data-on='true'] {
-  box-shadow:
-    0 0 0 2px #fff,
-    0 0 0 4px #7c3aed,
-    0 18px 36px rgb(124 58 237 / 0.16);
+.routing-block[data-tone='overflow'][data-on='true'] {
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px #64748b;
 }
 
 .routing-pgc {
-  font-size: 3.25rem;
-  line-height: 1;
+  font-size: 1.5rem;
+  line-height: 1.15;
   font-weight: 700;
-  letter-spacing: -0.04em;
-  background: linear-gradient(90deg, #e11d8a 0%, #7c3aed 48%, #38bdf8 100%);
+  letter-spacing: -0.03em;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
-@media (min-width: 640px) {
-  .routing-pgc {
-    font-size: 3.75rem;
-  }
+.routing-block[data-tone='overall'] .routing-pgc {
+  background-image: linear-gradient(90deg, #e11d8a, #7c3aed, #38bdf8);
+}
+.routing-block[data-tone='primary'] .routing-pgc {
+  background-image: linear-gradient(90deg, #be185d, #e11d8a);
+}
+.routing-block[data-tone='training'] .routing-pgc {
+  background-image: linear-gradient(90deg, #0369a1, #38bdf8);
+}
+.routing-block[data-tone='cross-trained'] .routing-pgc {
+  background-image: linear-gradient(90deg, #6d28d9, #c084fc);
+}
+.routing-block[data-tone='overflow'] .routing-pgc {
+  background-image: linear-gradient(90deg, #334155, #94a3b8);
 }

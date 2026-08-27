@@ -295,6 +295,11 @@ export function formatWeekRange(start: string): string {
   return `${a}–${b}`
 }
 
+export function formatDateRange(start: string, end: string): string {
+  if (start === end) return formatWeek(start)
+  return `${formatWeek(start)} – ${formatWeek(end)}`
+}
+
 export function formatWeekday(iso: string): string {
   const [y, m, d] = iso.split('-').map(Number)
   const date = new Date(y, m - 1, d)

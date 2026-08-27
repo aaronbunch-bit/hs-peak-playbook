@@ -7,10 +7,10 @@ export type Cohort = (typeof COHORTS)[number]
 export const STAFFINGS = ['primary', 'cross-train'] as const
 export type Staffing = (typeof STAFFINGS)[number]
 
-export const ROUTING_GROUPS = ['primary', 'training', 'cross-trained', 'overflow'] as const
+export const ROUTING_GROUPS = ['overall', 'primary', 'training', 'cross-trained', 'overflow'] as const
 export type RoutingGroup = (typeof ROUTING_GROUPS)[number]
 
-export const ROUTING_PERIODS = ['yesterday', 'week'] as const
+export const ROUTING_PERIODS = ['yesterday', 'wtd', 'week', 'mtd', 'custom'] as const
 export type RoutingPeriod = (typeof ROUTING_PERIODS)[number]
 
 export type Trend = 'up' | 'down' | 'stagnant'
@@ -70,7 +70,7 @@ export type DailyRow = {
   cc90: number | null
 }
 
-/** Unrestricted HS/K12 person row for Yesterday / last complete week. */
+/** Unrestricted HS/K12 person row rolled up over a routing date range. */
 export type RoutingFact = {
   date: string
   name: string
@@ -81,6 +81,14 @@ export type RoutingFact = {
   k12Cc90: number
   k12Pgc: number | null
   totalPgc: number | null
+}
+
+export type RoutingRangePayload = {
+  start: string
+  end: string
+  facts: RoutingFact[]
+  empty?: boolean
+  emptyReason?: string
 }
 
 export type FocusLogEntry = {

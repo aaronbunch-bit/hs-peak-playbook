@@ -1,39 +1,80 @@
-import { ROUTING_GROUP_META } from '../data/routingGroups'
+import { ROUTING_GROUP_META, ROUTING_OVERALL_META } from '../data/routingGroups'
 import { formatPgc } from '../lib/pacer'
 import type { RoutingGroupStats } from '../lib/routing'
-import type { RoutingGroup } from '../lib/types'
+import type { RoutingGroup, Slice } from '../lib/types'
 
 type Props = {
   stats: RoutingGroupStats[]
+  overall: RoutingGroupStats
   selected: RoutingGroup | null
+  slice: Slice
+  loading?: boolean
   onSelect: (group: RoutingGroup | null) => void
 }
 
-export function RoutingBlocks({ stats, selected, onSelect }: Props) {
+function overallHint(slice: Slice): string {
+  if (slice === 'hs-stem') return 'All pools · HS-STEM'
+  if (slice === 'k12tp') return 'All pools · K12'
+  return 'All pools · Super'
+}
+
+function BlockCopy({
+  label,
+  hint,
+  row,
+  selected,
+}: {
+  label: string
+  hint: string
+  row: RoutingGroupStats
+  selected: boolean
+}) {
+  const meta = `${row.n} · ${row.cc90 > 0 ? `${row.cc90.toLocaleString()} cc90` : '—'}${selected ? ' · list' : ''}`
+  return (
+    <>
+      <p className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{label}</p>
+      <p className="routing-pgc mt-1 tabular-nums">{formatPgc(row.pgc)}</p>
+      <p className="text-xs text-slate-400" title={hint}>
+        {hint} · {meta}
+      </p>
+    </>
+  )
+}
+
+export function RoutingBlocks({ stats, overall, selected, slice, loading = false, onSelect }: Props) {
   const byGroup = new Map(stats.map((s) => [s.group, s]))
+  const cards: Array<{ id: RoutingGroup; label: string; hint: string; row: RoutingGroupStats }> = [
+    {
+      id: 'overall',
+      label: ROUTING_OVERALL_META.label,
+      hint: overallHint(slice),
+      row: overall,
+    },
+    ...ROUTING_GROUP_META.map((meta) => ({
+      id: meta.id,
+      label: meta.label,
+      hint: meta.id === 'primary' ? 'Peak' : meta.id === 'training' ? 'JP Riordan' : meta.id === 'cross-trained' ? 'Named list' : 'Everyone else',
+      row: byGroup.get(meta.id) ?? { group: meta.id, pgc: null, cc90: 0, n: 0 },
+    })),
+  ]
 
   return (
-    <div className="mx-auto grid max-w-6xl grid-cols-1 gap-4 px-4 sm:grid-cols-2 sm:px-6">
-      {ROUTING_GROUP_META.map((meta) => {
-        const row = byGroup.get(meta.id) ?? { group: meta.id, pgc: null, cc90: 0, n: 0 }
-        const on = selected === meta.id
+    <div
+      className={`mx-auto grid max-w-6xl grid-cols-3 gap-3 px-4 sm:px-6 ${loading ? 'pointer-events-none opacity-50' : ''}`}
+      aria-busy={loading}
+    >
+      {cards.map((card) => {
+        const on = selected === card.id
         return (
           <button
-            key={meta.id}
+            key={card.id}
             type="button"
             data-on={on}
-            data-tone={meta.id}
-            onClick={() => onSelect(on ? null : meta.id)}
+            data-tone={card.id}
+            onClick={() => onSelect(on ? null : card.id)}
             className="routing-block"
           >
-            <p className="text-[11px] font-semibold tracking-[0.18em] text-slate-400 uppercase">{meta.label}</p>
-            <p className="routing-pgc mt-3 tabular-nums">{formatPgc(row.pgc)}</p>
-            <p className="mt-3 text-sm text-slate-600">{meta.hint}</p>
-            <p className="mt-1 text-xs text-slate-400">
-              {row.n} {row.n === 1 ? 'person' : 'people'}
-              {row.cc90 > 0 ? ` · ${row.cc90.toLocaleString()} cc90` : ''}
-              {on ? ' · showing list' : ''}
-            </p>
+            <BlockCopy label={card.label} hint={card.hint} row={card.row} selected={on} />
           </button>
         )
       })}

@@ -37,6 +37,18 @@ export function lastCompleteWeekStart(d = new Date()): string {
   return previousSunday(sundayWeekStart(d))
 }
 
+export function monthStart(d = new Date()): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  return `${y}-${m}-01`
+}
+
+const ISO = /^\d{4}-\d{2}-\d{2}$/
+
+export function isIsoDate(value: string | null | undefined): value is string {
+  return Boolean(value && ISO.test(value))
+}
+
 /** Inclusive Sunday → today (ISO dates) for the in-progress week. */
 export function daysSundayThroughToday(d = new Date()): string[] {
   const start = sundayWeekStart(d)

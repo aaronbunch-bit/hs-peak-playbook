@@ -4,7 +4,8 @@ import { seed } from '../data/seed'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import { factsToRouting } from './routing'
-import type { DailyRow, LookerFact, PacerPayload, Slice, Staffing } from './types'
+import { clampRange } from './routingRange'
+import type { DailyRow, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
 const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
 const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
@@ -95,6 +96,7 @@ type QueryExtra = {
   filters?: Record<string, string>
   sorts?: string[]
   peakNames?: boolean
+  limit?: string
 }
 
 async function runQueryCsv(
@@ -145,7 +147,7 @@ function queryBody(
     pivots: query.pivots,
     filters,
     sorts: extra?.sorts ?? query.sorts,
-    limit: extra?.peakNames === false ? '10000' : (query.limit ?? '5000'),
+    limit: extra?.limit ?? (extra?.peakNames === false ? '10000' : (query.limit ?? '5000')),
     dynamic_fields: query.dynamic_fields,
     query_timezone: query.query_timezone,
     fill_fields: query.fill_fields,
@@ -182,22 +184,13 @@ async function runDod(token: string, query: LookerQuery): Promise<string> {
   })
 }
 
-async function runYesterday(token: string, query: LookerQuery): Promise<string> {
-  return runQueryCsv(token, query, 'yesterday', {
+async function runRoutingRange(token: string, query: LookerQuery, start: string, end: string): Promise<string> {
+  return runQueryCsv(token, query, `${start} to ${addDays(end, 1)}`, {
     fields: dailyFields(query),
     filters: DASHBOARD_7699_FILTERS,
     sorts: [`${DATE_FIELD} desc`, REP_NAME_FIELD],
     peakNames: false,
-  })
-}
-
-async function runLastCompleteWeek(token: string, query: LookerQuery): Promise<string> {
-  const start = lastCompleteWeekStart()
-  const end = addDays(start, 6)
-  return runQueryCsv(token, query, `${start} to ${end}`, {
-    filters: DASHBOARD_7699_FILTERS,
-    sorts: [WEEK_FIELD, REP_NAME_FIELD],
-    peakNames: false,
+    limit: '50000',
   })
 }
 
@@ -244,7 +237,6 @@ export function payloadFromFacts(
   wtdFacts: LookerFact[],
   source: string,
   dailyFacts: LookerFact[] = [],
-  routing?: { yesterday: LookerFact[]; lastWeek: LookerFact[] },
 ): PacerPayload {
   const weekly = facts.map((f) => factToWeekly(f, slice)).filter((row) => row != null)
   const weeks = [...new Set(facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
@@ -260,8 +252,6 @@ export function payloadFromFacts(
       cc90: row.cc90,
     }))
   const rosterFacts = [...facts, ...dailyFacts, ...wtdFacts]
-  const yesterdayDate = yesterday()
-  const lastWeekStart = lastCompleteWeekStart()
   return {
     source,
     slice,
@@ -277,12 +267,23 @@ export function payloadFromFacts(
     dailyDays: daysSundayThroughToday(),
     wtdWeek,
     wtdAsOf: toIsoDate(new Date()),
-    yesterdayDate,
-    yesterdayFacts: factsToRouting(routing?.yesterday ?? []),
-    lastWeekStart,
-    lastWeekFacts: factsToRouting(routing?.lastWeek ?? []),
+    yesterdayDate: yesterday(),
+    yesterdayFacts: [],
+    lastWeekStart: lastCompleteWeekStart(),
+    lastWeekFacts: [],
     focusLog: seed.focusLog,
   }
+}
+
+export async function fetchLookerRouting(from: string, to: string): Promise<RoutingRangePayload> {
+  const range = clampRange(from, to)
+  if (!lookerConfigured()) {
+    return { ...range, facts: [], empty: true, emptyReason: 'Looker is not configured. Set LOOKER_CLIENT_ID and LOOKER_CLIENT_SECRET.' }
+  }
+  const token = await login()
+  const query = await lookQuery(token)
+  const csv = await runRoutingRange(token, query, range.start, range.end)
+  return { start: range.start, end: range.end, facts: factsToRouting(parseLookerPlaybook(csv)) }
 }
 
 export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Promise<PacerPayload> {
@@ -298,12 +299,10 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
 
   const token = await login()
   const query = await lookQuery(token)
-  const [closed, wtdCsv, dodCsv, yesterdayCsv, lastWeekCsv] = await Promise.all([
+  const [closed, wtdCsv, dodCsv] = await Promise.all([
     runClosedWeeks(token, query),
     runWtd(token, query).catch(() => ''),
     runDod(token, query).catch(() => ''),
-    runYesterday(token, query).catch(() => ''),
-    runLastCompleteWeek(token, query).catch(() => ''),
   ])
   const facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
   const wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
@@ -314,10 +313,6 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
     wtdFacts,
     `Looker look ${lookId()} · High School Peak by Rep Name`,
     dailyFacts,
-    {
-      yesterday: yesterdayCsv ? parseLookerPlaybook(yesterdayCsv) : [],
-      lastWeek: lastWeekCsv ? parseLookerPlaybook(lastWeekCsv) : [],
-    },
   )
   if (payload.weekly.length === 0 && payload.daily.length === 0) {
     return emptyPayload(slice, `No rows for ${SLICE_LOOKER_FILTERS[slice].label} from Looker look ${lookId()}.`)
@@ -378,10 +373,22 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
   }
 
   try {
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    if (from && to) {
+      const payload = await fetchLookerRouting(from, to)
+      return Response.json(payload)
+    }
     const payload = await fetchLookerPayload(safeSlice, staffing)
     return Response.json(payload, { status: payload.empty ? 200 : 200 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Looker request failed'
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    if (from && to) {
+      const range = clampRange(from, to)
+      return Response.json({ ...range, facts: [], empty: true, emptyReason: message })
+    }
     return Response.json(emptyPayload(safeSlice, message), { status: 200 })
   }
 }

@@ -45,7 +45,13 @@ export const OVERFLOW_EXCLUDED_MANAGERS = [
 
 const OVERFLOW_EXCLUDED_MANAGER_SET = new Set(OVERFLOW_EXCLUDED_MANAGERS.map((n) => n.trim().toLowerCase()))
 
-export const ROUTING_GROUP_META: Array<{ id: RoutingGroup; label: string; hint: string }> = [
+export const ROUTING_OVERALL_META = {
+  id: 'overall' as const,
+  label: 'Overall',
+  hint: 'All four pools combined',
+}
+
+export const ROUTING_GROUP_META: Array<{ id: Exclude<RoutingGroup, 'overall'>; label: string; hint: string }> = [
   { id: 'primary', label: 'Primary', hint: 'High School Peak' },
   { id: 'training', label: 'Training', hint: 'John Paul Riordan' },
   { id: 'cross-trained', label: 'Cross-trained', hint: 'Named cross-train list' },

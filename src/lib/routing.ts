@@ -38,25 +38,59 @@ function hasHsK12Volume(fact: Pick<LookerFact, 'hsCc90' | 'k12Cc90' | 'hsPgc' | 
 }
 
 export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
-  const out: RoutingFact[] = []
-  for (const fact of facts) {
+  type Acc = {
+    name: string
+    manager: string | null
+    routingGroup: RoutingGroup
+    hsSold: number
+    hsCc90: number
+    k12Sold: number
+    k12Cc90: number
+    date: string
+  }
+  const byName = new Map<string, Acc>()
+  const ordered = [...facts].sort((a, b) => a.week.localeCompare(b.week))
+  for (const fact of ordered) {
     const name = canonicalHighSchoolName(fact.name) ?? fact.name.trim()
     if (!name || !hasHsK12Volume(fact)) continue
     const routingGroup = assignRoutingGroup(name, fact.manager)
     if (routingGroup === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
-    out.push({
-      date: fact.week,
-      name,
-      manager: fact.manager,
-      routingGroup,
-      hsCc90: fact.hsCc90,
-      hsPgc: fact.hsPgc,
-      k12Cc90: fact.k12Cc90,
-      k12Pgc: fact.k12Pgc,
-      totalPgc: fact.totalPgc,
-    })
+    const key = name.toLowerCase()
+    const hsSold = (fact.hsPgc ?? 0) * fact.hsCc90
+    const k12Sold = (fact.k12Pgc ?? 0) * fact.k12Cc90
+    const prev = byName.get(key)
+    if (!prev) {
+      byName.set(key, {
+        name,
+        manager: fact.manager,
+        routingGroup,
+        hsSold,
+        hsCc90: fact.hsCc90,
+        k12Sold,
+        k12Cc90: fact.k12Cc90,
+        date: fact.week,
+      })
+      continue
+    }
+    prev.hsSold += hsSold
+    prev.hsCc90 += fact.hsCc90
+    prev.k12Sold += k12Sold
+    prev.k12Cc90 += fact.k12Cc90
+    prev.manager = fact.manager
+    prev.routingGroup = routingGroup
+    prev.date = fact.week
   }
-  return out
+  return [...byName.values()].map((row) => ({
+    date: row.date,
+    name: row.name,
+    manager: row.manager,
+    routingGroup: row.routingGroup,
+    hsCc90: row.hsCc90,
+    hsPgc: row.hsCc90 > 0 ? row.hsSold / row.hsCc90 : null,
+    k12Cc90: row.k12Cc90,
+    k12Pgc: row.k12Cc90 > 0 ? row.k12Sold / row.k12Cc90 : null,
+    totalPgc: row.hsCc90 + row.k12Cc90 > 0 ? (row.hsSold + row.k12Sold) / (row.hsCc90 + row.k12Cc90) : null,
+  }))
 }
 
 /** Clients sold ≈ pGC × cc90 per audience. Super is HS sold + K12 sold over HS+K12 cc90. */
@@ -112,7 +146,7 @@ export function groupWeightedPgc(rows: Array<{ sold: number; cc90: number }>): n
 }
 
 export function routingGroupStats(rows: RoutingRepRow[], group: RoutingGroup): RoutingGroupStats {
-  const scoped = rows.filter((r) => r.routingGroup === group)
+  const scoped = group === 'overall' ? rows : rows.filter((r) => r.routingGroup === group)
   return {
     group,
     pgc: groupWeightedPgc(scoped),

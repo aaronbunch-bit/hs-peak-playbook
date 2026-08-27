@@ -4,7 +4,8 @@ import { daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDa
 import { factHasSlice, factToWeekly } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import { factsToRouting } from './routing'
-import type { PacerPayload, Slice, Staffing } from './types'
+import { clampRange } from './routingRange'
+import type { PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
 export { emptyPayload, SLICE_LOOKER_FILTERS }
 
@@ -21,7 +22,7 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
     }
     if (res.ok) {
       const data = (await res.json()) as PacerPayload
-      if (data.weekly?.length || data.daily?.length || data.yesterdayFacts?.length || data.lastWeekFacts?.length || data.empty) return data
+      if (data.weekly?.length || data.daily?.length || data.empty) return data
     }
   } catch {
     // Local Vite uses the seed if the Looker proxy is not running.
@@ -61,11 +62,54 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
     wtdWeek: sundayWeekStart(),
     wtdAsOf: toIsoDate(new Date()),
     yesterdayDate: yesterday(),
-    yesterdayFacts: factsToRouting(facts.map((f) => ({ ...f, week: yesterday() }))),
+    yesterdayFacts: [],
     lastWeekStart: weeks[0] ?? lastCompleteWeekStart(),
-    lastWeekFacts: factsToRouting(facts.filter((f) => f.week === weeks[0])),
+    lastWeekFacts: [],
     focusLog: seed.focusLog,
   }
+}
+
+export async function fetchRoutingData(start: string, end: string): Promise<RoutingRangePayload> {
+  const range = clampRange(start, end)
+  try {
+    const qs = new URLSearchParams({ from: range.start, to: range.end })
+    const headers: HeadersInit = {}
+    const token = await getSiteAccessToken()
+    if (token) headers.Authorization = `Bearer ${token}`
+    const res = await fetch(`/.netlify/functions/looker?${qs}`, { headers })
+    if (res.status === 401 || res.status === 403) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string }
+      return { ...range, facts: [], empty: true, emptyReason: body.error ?? 'Sign in with Google to load routing data.' }
+    }
+    if (res.ok) {
+      const data = (await res.json()) as RoutingRangePayload
+      if (Array.isArray(data.facts) && (!data.empty || import.meta.env.PROD)) {
+        return {
+          start: data.start ?? range.start,
+          end: data.end ?? range.end,
+          facts: data.facts,
+          empty: data.empty,
+          emptyReason: data.emptyReason,
+        }
+      }
+    }
+  } catch {
+    // Local Vite uses the seed if the Looker proxy is not running.
+  }
+
+  if (import.meta.env.PROD) {
+    return {
+      ...range,
+      facts: [],
+      empty: true,
+      emptyReason: 'Looker did not return this range. Refresh after sign-in, or check Netlify env vars.',
+    }
+  }
+
+  const { seed } = await import('../data/seed')
+  const inRange = seed.facts.filter((f) => f.week >= range.start && f.week <= range.end)
+  const facts = inRange.length ? inRange : seed.facts
+  return { ...range, facts: factsToRouting(facts) }
 }
 
 export { factHasSlice }
