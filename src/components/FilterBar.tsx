@@ -130,7 +130,7 @@ export function FilterBar({
                 type="button"
                 className="nav-tab"
                 data-on={tab === 'intraday'}
-                title="Today so far · Peak primary · HS, K12, and Super"
+                title="Today so far · routing buckets · HS, K12, and Super"
                 onClick={() => onTab('intraday')}
               >
                 Intraday
@@ -336,7 +336,7 @@ export function FilterBar({
                 ))}
               </select>
             </Field>
-            <p className="pb-1 text-xs text-slate-500">Peak primary · HS, K12, and Super on one row.</p>
+            <p className="pb-1 text-xs text-slate-500">Click a bucket. Super pGC is today’s HS + K12 sold ÷ cc90.</p>
           </div>
         )}
 

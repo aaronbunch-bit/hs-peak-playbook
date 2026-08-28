@@ -1,6 +1,7 @@
 import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
 import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
 import { impliedImpact } from './lookerExport'
+import { clientImpact } from './pacer'
 import { expectedPgc, type LcCurves } from './settings'
 import type { LookerFact, RoutingFact, RoutingGroup, Slice } from './types'
 
@@ -8,7 +9,6 @@ export type RoutingVolume = {
   sold: number
   cc90: number
   pgc: number | null
-  impact: number
 }
 
 export type RoutingRepRow = {
@@ -20,7 +20,7 @@ export type RoutingRepRow = {
   pgc: number | null
   cc90: number
   sold: number
-  impact: number
+  impact: number | null
 }
 
 export type RoutingGroupStats = {
@@ -106,24 +106,24 @@ export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
   }))
 }
 
-/** Client impact is Looker Closed Client Count. Super is HS + K12. */
+/** Slice volume for pGC. Super is HS + K12. Closed Client Count is sold, not 7699 impact. */
 export function volumeForSlice(fact: RoutingFact, slice: Slice): RoutingVolume {
   if (slice === 'hs-stem') {
     const cc90 = fact.hsCc90
-    const impact = fact.hsImpact
-    const sold = impact > 0 ? impact : (fact.hsPgc ?? 0) * cc90
-    return { sold, cc90, pgc: fact.hsPgc ?? (cc90 > 0 ? sold / cc90 : null), impact }
+    const closedClients = fact.hsImpact
+    const sold = closedClients > 0 ? closedClients : (fact.hsPgc ?? 0) * cc90
+    return { sold, cc90, pgc: fact.hsPgc ?? (cc90 > 0 ? sold / cc90 : null) }
   }
   if (slice === 'k12tp') {
     const cc90 = fact.k12Cc90
-    const impact = fact.k12Impact
-    const sold = impact > 0 ? impact : (fact.k12Pgc ?? 0) * cc90
-    return { sold, cc90, pgc: fact.k12Pgc ?? (cc90 > 0 ? sold / cc90 : null), impact }
+    const closedClients = fact.k12Impact
+    const sold = closedClients > 0 ? closedClients : (fact.k12Pgc ?? 0) * cc90
+    return { sold, cc90, pgc: fact.k12Pgc ?? (cc90 > 0 ? sold / cc90 : null) }
   }
   const cc90 = fact.hsCc90 + fact.k12Cc90
-  const impact = fact.hsImpact + fact.k12Impact
-  const sold = impact > 0 ? impact : (fact.hsPgc ?? 0) * fact.hsCc90 + (fact.k12Pgc ?? 0) * fact.k12Cc90
-  return { sold, cc90, pgc: fact.totalPgc ?? (cc90 > 0 ? sold / cc90 : null), impact }
+  const closedClients = fact.hsImpact + fact.k12Impact
+  const sold = closedClients > 0 ? closedClients : (fact.hsPgc ?? 0) * fact.hsCc90 + (fact.k12Pgc ?? 0) * fact.k12Cc90
+  return { sold, cc90, pgc: fact.totalPgc ?? (cc90 > 0 ? sold / cc90 : null) }
 }
 
 export function buildRoutingRows(
@@ -150,7 +150,7 @@ export function buildRoutingRows(
       pgc: vol.pgc,
       cc90: vol.cc90,
       sold: vol.sold,
-      impact: vol.impact,
+      impact: clientImpact(vol.pgc, targetPgc, vol.cc90),
     })
   }
   return rows
@@ -162,7 +162,10 @@ export function groupWeightedPgc(rows: Array<{ sold: number; cc90: number }>): n
   return rows.reduce((sum, r) => sum + r.sold, 0) / cc90
 }
 
-export function routingGroupStats(rows: RoutingRepRow[], group: RoutingGroup): RoutingGroupStats {
+export function routingGroupStats(
+  rows: Array<{ sold: number; cc90: number; routingGroup: RoutingGroup }>,
+  group: RoutingGroup,
+): RoutingGroupStats {
   const scoped = group === 'overall' ? rows : rows.filter((r) => r.routingGroup === group)
   return {
     group,

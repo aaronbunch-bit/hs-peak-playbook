@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { comparePgcNullsLast, formatImpact, formatPgc } from '../lib/pacer'
+import { comparePgcNullsLast, formatImpact, formatPgc, impactClass } from '../lib/pacer'
 import type { RoutingRepRow } from '../lib/routing'
 import type { LcCurves } from '../lib/settings'
 import type { Slice } from '../lib/types'
@@ -81,8 +81,8 @@ export function RoutingTable({
         return dir * (a.cc90 - b.cc90)
       }
       if (sortKey === 'impact') {
-        if (a.impact === b.impact) return a.name.localeCompare(b.name)
-        return dir * (a.impact - b.impact)
+        const cmp = comparePgcNullsLast(a.impact, b.impact, sortDir)
+        return cmp === 0 ? a.name.localeCompare(b.name) : cmp
       }
       const cmp = comparePgcNullsLast(a.pgc, b.pgc, sortDir)
       return cmp === 0 ? a.name.localeCompare(b.name) : cmp
@@ -149,7 +149,7 @@ export function RoutingTable({
                   <td className="px-3 py-3 text-right tabular-nums text-slate-700">
                     {row.cc90 > 0 ? row.cc90.toLocaleString() : '—'}
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-slate-700">
+                  <td className={`px-3 py-3 text-right tabular-nums ${impactClass(row.impact)}`}>
                     {formatImpact(row.impact)}
                   </td>
                 </tr>
@@ -167,7 +167,8 @@ export function RoutingTable({
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         {periodLabel} · {groupLabel}. Group block is sold ÷ HS/K12 cc90 for the bucket, not an average of
-        averages. Impact is Looker Closed Client Count. Blanks sort last.
+        averages. Impact is (pGC − the Rules target for this audience) × cc90, one decimal — same idea as
+        dashboard 7699. Blanks sort last.
       </p>
     </div>
   )

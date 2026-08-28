@@ -53,9 +53,9 @@ export const ROUTING_OVERALL_META = {
 
 export const ROUTING_GROUP_META: Array<{ id: Exclude<RoutingGroup, 'overall'>; label: string; hint: string }> = [
   { id: 'primary', label: 'Primary', hint: 'High School Peak' },
-  { id: 'training', label: 'Training', hint: 'John Paul Riordan' },
   { id: 'cross-trained', label: 'Cross-trained', hint: 'Named cross-train list' },
   { id: 'overflow', label: 'Overflow', hint: 'Everyone else with HS/K12 volume' },
+  { id: 'training', label: 'Training', hint: 'John Paul Riordan' },
 ]
 
 function managerKey(manager: string | null | undefined): string {

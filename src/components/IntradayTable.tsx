@@ -37,6 +37,7 @@ type Props = {
   rows: IntradayRepRow[]
   selected: string | null
   asOf: string
+  emptyLabel?: string
   targetHs: number
   targetK12: number
   targetSuper: number
@@ -48,6 +49,7 @@ export function IntradayTable({
   rows,
   selected,
   asOf,
+  emptyLabel,
   targetHs,
   targetK12,
   targetSuper,
@@ -195,7 +197,7 @@ export function IntradayTable({
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
-                  No Peak primary people with HS/K12 CC90 yet today.
+                  No people with HS/K12 CC90 yet today{emptyLabel ? ` in ${emptyLabel}` : ''}.
                 </td>
               </tr>
             )}
@@ -203,9 +205,9 @@ export function IntradayTable({
         </table>
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-        Today so far{asOf ? ` · ${formatWeek(asOf)}` : ''}. Peak primary only. HS and K12 are Looker Audience
-        (Sales); Super is those two combined (sold ÷ cc90). Default sort is Super pGC low to high. Expert CC90
-        calls, same tag exclusions as look 26569.
+        Today so far{asOf ? ` · ${formatWeek(asOf)}` : ''}. Bucket pGC is Super (HS + K12 sold ÷ cc90). HS and K12
+        columns are Looker Audience (Sales). Default sort is Super pGC low to high. Expert CC90 calls, same tag
+        exclusions as look 26569.
       </p>
     </div>
   )

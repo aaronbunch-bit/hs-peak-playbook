@@ -289,7 +289,7 @@ export function payloadFromFacts(
 async function runIntradayCsv(token: string, query: LookerQuery): Promise<string> {
   const filters: Record<string, string> = { ...(query.filters ?? {}) }
   delete filters['employee_directory.rd_name']
-  filters['employee_directory.mgr_name'] = lookerRepNameFilter()
+  delete filters['employee_directory.mgr_name']
   filters['call_view.call_created_at_date'] = 'today'
   filters['contact_audience_subject_calls.audience_subject'] = 'HS-STEM,K12 Test Prep'
   const res = await lookerFetch(token, '/queries/run/csv', {
@@ -307,7 +307,7 @@ async function runIntradayCsv(token: string, query: LookerQuery): Promise<string
       ],
       filters,
       sorts: ['employee_directory.mgr_name'],
-      limit: '5000',
+      limit: '10000',
       dynamic_fields: query.dynamic_fields,
       query_timezone: query.query_timezone,
     }),
@@ -324,10 +324,10 @@ export async function fetchLookerIntraday(): Promise<IntradayPayload> {
   const query = await lookQueryFor(token, intradayLookId())
   const rows = parseIntradayCsv(await runIntradayCsv(token, query))
   if (rows.length === 0) {
-    return emptyIntraday('No Peak primary people with HS/K12 CC90 yet today.')
+    return emptyIntraday('No people with HS/K12 CC90 yet today.')
   }
   return {
-    source: `Looker look ${intradayLookId()} · Peak primary`,
+    source: `Looker look ${intradayLookId()}`,
     asOf: toIsoDate(new Date()),
     rows,
   }

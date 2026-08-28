@@ -152,7 +152,7 @@ const VIS_COLS: Cols = {
   totalPgc: 10,
 }
 
-/** Raw query CSV includes Closed Client Count (client impact) between CC90 and pGC for each audience. */
+/** Raw query CSV includes Closed Client Count (sold) between CC90 and pGC for each audience. */
 const RAW_COLS: Cols = {
   week: 0,
   superGroup: 1,

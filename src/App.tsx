@@ -86,6 +86,12 @@ function syntheticIntradayRow(row: IntradayRepRow): RepRow {
   }
 }
 
+function groupLabel(group: RoutingGroup | null): string {
+  if (!group) return ''
+  if (group === 'overall') return ROUTING_OVERALL_META.label
+  return ROUTING_GROUP_META.find((m) => m.id === group)?.label ?? group
+}
+
 export default function App() {
   const initial = readHash()
   const [tab, setTab] = useState<AppTab>(initial.tab === 'wtd' ? 'playbook' : initial.tab)
@@ -109,7 +115,9 @@ export default function App() {
   const [playbookLoading, setPlaybookLoading] = useState(false)
   const [updatedAt, setUpdatedAt] = useState<number | null>(null)
   const [routingPeriod, setRoutingPeriod] = useState<RoutingPeriod>(initial.routingPeriod)
-  const [routingGroup, setRoutingGroup] = useState<RoutingGroup | null>(initial.routingGroup)
+  const [routingGroup, setRoutingGroup] = useState<RoutingGroup | null>(
+    initial.tab === 'intraday' && !initial.routingGroup ? 'overall' : initial.routingGroup,
+  )
   const [routingStart, setRoutingStart] = useState(initial.routingFrom)
   const [routingEnd, setRoutingEnd] = useState(initial.routingTo)
   const [routingFacts, setRoutingFacts] = useState<RoutingFact[]>([])
@@ -250,6 +258,10 @@ export default function App() {
   }, [tab, routingStart, routingEnd, reload])
 
   useEffect(() => {
+    if (tab === 'intraday' && routingGroup == null) setRoutingGroup('overall')
+  }, [tab, routingGroup])
+
+  useEffect(() => {
     if (tab !== 'intraday') return
     let cancelled = false
     setIntradayLoading(true)
@@ -372,10 +384,36 @@ export default function App() {
     })
   }, [livePayload, focus, targetPgc, staffing, settings.lcCurves])
 
-  const intradayRows = useMemo(() => {
+  const intradayRowsAll = useMemo(() => {
     const built = buildIntradayRows(intraday?.rows ?? [], livePayload?.roster ?? [], settings.targets, settings.lcCurves)
-    return manager ? built.filter((r) => r.manager === manager) : built
-  }, [intraday, livePayload, settings.targets, settings.lcCurves, manager])
+    return built.filter((r) => r.routingGroup !== 'primary' || !hiddenSet.has(r.name))
+  }, [intraday, livePayload, settings.targets, settings.lcCurves, hiddenSet])
+
+  const intradayRows = useMemo(
+    () => (manager ? intradayRowsAll.filter((r) => r.manager === manager) : intradayRowsAll),
+    [intradayRowsAll, manager],
+  )
+
+  const intradayVolume = useMemo(
+    () =>
+      intradayRows.map((r) => ({
+        sold: (r.superPgc ?? 0) * r.superCc90,
+        cc90: r.superCc90,
+        routingGroup: r.routingGroup,
+      })),
+    [intradayRows],
+  )
+  const intradayStats = useMemo(
+    () => ROUTING_GROUP_META.map((meta) => routingGroupStats(intradayVolume, meta.id)),
+    [intradayVolume],
+  )
+  const intradayOverall = useMemo(() => routingGroupStats(intradayVolume, 'overall'), [intradayVolume])
+
+  const intradayDetailRows = useMemo(() => {
+    if (!routingGroup) return []
+    if (routingGroup === 'overall') return intradayRows
+    return intradayRows.filter((r) => r.routingGroup === routingGroup)
+  }, [intradayRows, routingGroup])
 
   const lastFocusMap = useMemo(() => {
     const map = new Map<string, string | null>()
@@ -434,7 +472,7 @@ export default function App() {
       .filter((item) => !manager || item.manager === manager)
   }, [catalogRows, livePayload, focus, focusWeek, notes, manager])
 
-  const selectedIntraday = intradayRows.find((r) => r.name === selected) ?? null
+  const selectedIntraday = intradayDetailRows.find((r) => r.name === selected) ?? null
   const selectedRouting = routingDetailRows.find((r) => r.name === selected) ?? null
   const selectedRow =
     tab === 'routing'
@@ -597,11 +635,7 @@ export default function App() {
                 targetPgc={targetPgc}
                 lcCurves={settings.lcCurves}
                 periodLabel={formatDateRange(routingStart, routingEnd)}
-                groupLabel={
-                  routingGroup === 'overall'
-                    ? ROUTING_OVERALL_META.label
-                    : (ROUTING_GROUP_META.find((m) => m.id === routingGroup)?.label ?? routingGroup)
-                }
+                groupLabel={groupLabel(routingGroup)}
                 onSelect={setSelected}
               />
             )}
@@ -610,25 +644,37 @@ export default function App() {
           <>
             {intradayLoading && !intraday ? (
               <p className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">Loading today…</p>
-            ) : intraday?.empty ? (
+            ) : null}
+            <RoutingBlocks
+              stats={intradayStats}
+              overall={intradayOverall}
+              selected={routingGroup}
+              loading={intradayLoading}
+              onSelect={(group) => {
+                setRoutingGroup(group ?? 'overall')
+                setSelected(null)
+              }}
+            />
+            {intraday?.empty ? (
               <div className="mx-auto max-w-6xl px-4 sm:px-6">
                 <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
                   <p className="text-lg font-semibold text-slate-800">Intraday pGC</p>
                   <p className="mx-auto mt-2 max-w-lg text-sm text-slate-500">{intraday.emptyReason}</p>
                 </div>
               </div>
-            ) : (
+            ) : routingGroup ? (
               <IntradayTable
-                rows={intradayRows}
+                rows={intradayDetailRows}
                 selected={selected}
                 asOf={intraday?.asOf ?? ''}
+                emptyLabel={groupLabel(routingGroup)}
                 targetHs={targetForSlice('hs-stem', settings.targets)}
                 targetK12={targetForSlice('k12tp', settings.targets)}
                 targetSuper={targetForSlice('supergroup', settings.targets)}
                 lcCurves={settings.lcCurves}
                 onSelect={setSelected}
               />
-            )}
+            ) : null}
           </>
         ) : !livePayload || livePayload.slice !== slice ? (
           <div className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">Loading week…</div>

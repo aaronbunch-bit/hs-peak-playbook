@@ -7,7 +7,7 @@ export type Cohort = (typeof COHORTS)[number]
 export const STAFFINGS = ['primary', 'cross-train'] as const
 export type Staffing = (typeof STAFFINGS)[number]
 
-export const ROUTING_GROUPS = ['overall', 'primary', 'training', 'cross-trained', 'overflow'] as const
+export const ROUTING_GROUPS = ['overall', 'primary', 'cross-trained', 'overflow', 'training'] as const
 export type RoutingGroup = (typeof ROUTING_GROUPS)[number]
 
 export const ROUTING_PERIODS = ['yesterday', 'wtd', 'week', 'mtd', 'custom'] as const
@@ -98,10 +98,11 @@ export type RoutingRangePayload = {
   emptyReason?: string
 }
 
-/** Look 26569: Manager = rep, Regional Director = manager. Today so far, Peak primary. */
+/** Look 26569: Manager = rep, Regional Director = manager. Today so far. */
 export type IntradayRow = {
   name: string
   manager: string | null
+  routingGroup: RoutingGroup
   hsPgc: number | null
   hsCc90: number
   k12Pgc: number | null

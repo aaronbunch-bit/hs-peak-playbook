@@ -125,11 +125,13 @@ export function writeHash(state: HashState): void {
     params.set('staffing', state.staffing)
   }
   if (state.week) params.set('week', state.week)
-  if (state.tab === 'routing') {
-    if (state.routingPeriod !== 'yesterday') params.set('period', state.routingPeriod)
-    if (state.routingPeriod === 'custom') {
-      params.set('from', state.routingFrom)
-      params.set('to', state.routingTo)
+  if (state.tab === 'routing' || state.tab === 'intraday') {
+    if (state.tab === 'routing') {
+      if (state.routingPeriod !== 'yesterday') params.set('period', state.routingPeriod)
+      if (state.routingPeriod === 'custom') {
+        params.set('from', state.routingFrom)
+        params.set('to', state.routingTo)
+      }
     }
     if (state.routingGroup) params.set('group', state.routingGroup)
   }

@@ -176,7 +176,7 @@ export function buildRows(
         manager: r.manager,
         pgc,
         cc90,
-        impact: point?.impact ?? null,
+        impact: clientImpact(pgc, targetPgc, cc90),
         mix: point?.mix ?? null,
         expectedPgc: expect,
         deltaWow,
@@ -184,7 +184,7 @@ export function buildRows(
         atTarget: pgc != null && pgc >= expect,
         wtdPgc,
         wtdCc90: wtd?.cc90 ?? null,
-        wtdImpact: wtd?.impact ?? null,
+        wtdImpact: clientImpact(wtdPgc, targetPgc, wtd?.cc90 ?? null),
         wtdVsLast: weekOverWeek(wtdPgc, pgc),
         wtdAtTarget: wtdPgc != null && wtdPgc >= expect,
         weeks: weeksSeries,
@@ -247,7 +247,6 @@ export function buildDailyRows(
         }
       })
       const wtd = wtdByRep.get(r.name)
-      const dayImpact = series.reduce((sum, d) => sum + (d.impact ?? 0), 0)
       const dayCc90 = series.reduce((sum, d) => sum + (d.cc90 ?? 0), 0)
       return {
         name: r.name,
@@ -256,7 +255,7 @@ export function buildDailyRows(
         expectedPgc: expectedPgc(targetPgc, r.level, curves),
         wtdPgc: wtd?.pgc ?? null,
         wtdCc90: wtd?.cc90 ?? (dayCc90 > 0 ? dayCc90 : null),
-        wtdImpact: wtd?.impact ?? (dayImpact > 0 ? dayImpact : null),
+        wtdImpact: clientImpact(wtd?.pgc ?? null, targetPgc, wtd?.cc90 ?? (dayCc90 > 0 ? dayCc90 : null)),
         days: series,
       }
     })
@@ -295,9 +294,25 @@ export function formatBps(value: number | null | undefined): string {
   return `${sign}${bps.toLocaleString('en-US')} bps`
 }
 
+/** Dashboard 7699 Impact (Clients): (pGC − target) × cc90, one decimal. Target is the Rules bar for this slice. */
+export function clientImpact(
+  pgc: number | null | undefined,
+  targetPgc: number,
+  cc90: number | null | undefined,
+): number | null {
+  if (pgc == null || cc90 == null || cc90 <= 0) return null
+  return Math.round((pgc - targetPgc) * cc90 * 10) / 10
+}
+
 export function formatImpact(n: number | null | undefined): string {
   if (n == null) return '—'
-  return n.toLocaleString('en-US')
+  const sign = n > 0 ? '+' : ''
+  return `${sign}${n.toFixed(1)}`
+}
+
+export function impactClass(n: number | null | undefined): string {
+  if (n == null || n === 0) return 'text-slate-500'
+  return n > 0 ? 'text-emerald-600' : 'text-rose-600'
 }
 
 export function formatWeek(iso: string): string {

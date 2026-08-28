@@ -1,4 +1,5 @@
 import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
+import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
 import { toIsoDate } from './calendar'
 import { canonicalManager, parseCsv } from './lookerExport'
 import { expectedPgc, type LcCurves, type Targets, targetForSlice } from './settings'
@@ -62,7 +63,8 @@ export function parseIntradayCsv(csv: string): IntradayRow[] {
 
   const byName = new Map<string, Acc>()
   for (const cols of table.slice(1)) {
-    const name = canonicalHighSchoolName((cols[nameCol] ?? '').trim())
+    const rawName = (cols[nameCol] ?? '').trim()
+    const name = canonicalHighSchoolName(rawName) ?? rawName
     if (!name) continue
     const audience = audienceKey(cols[audCol] ?? '')
     if (!audience) continue
@@ -94,11 +96,14 @@ export function parseIntradayCsv(csv: string): IntradayRow[] {
 
   return [...byName.values()]
     .map((row) => {
+      const routingGroup = assignRoutingGroup(row.name, row.manager)
+      if (routingGroup === 'overflow' && isOverflowExcludedManager(row.manager)) return null
       const superCc90 = row.hsCc90 + row.k12Cc90
       const superSold = row.hsSold + row.k12Sold
       return {
         name: row.name,
         manager: row.manager,
+        routingGroup,
         hsPgc: pgc(row.hsSold, row.hsCc90),
         hsCc90: row.hsCc90,
         k12Pgc: pgc(row.k12Sold, row.k12Cc90),
@@ -107,7 +112,7 @@ export function parseIntradayCsv(csv: string): IntradayRow[] {
         superCc90,
       }
     })
-    .filter((row) => row.superCc90 > 0)
+    .filter((row): row is IntradayRow => row != null && row.superCc90 > 0)
 }
 
 export function buildIntradayRows(

@@ -6,6 +6,7 @@ import {
   formatPgc,
   formatWeek,
   formatWeekday,
+  impactClass,
   pgcOnDate,
   type DailyRepRow,
 } from '../lib/pacer'
@@ -173,7 +174,9 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
                       </div>
                     </div>
                   </td>
-                  <td className="px-3 py-3 text-right tabular-nums text-slate-700">{formatImpact(row.wtdImpact)}</td>
+                  <td className={`px-3 py-3 text-right tabular-nums ${impactClass(row.wtdImpact)}`}>
+                    {formatImpact(row.wtdImpact)}
+                  </td>
                   {row.days.map((day) => (
                     <td key={day.date} className="px-3 py-3 text-right">
                       <div className="flex flex-col items-end gap-0.5">
@@ -206,9 +209,9 @@ export function WtdTable({ rows, selected, slice, targetPgc, lcCurves, onSelect 
         </table>
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-        Click a day to sort by that day’s pGC. WTD is this Sunday through today; Impact WTD is Closed Client Count
-        for the same window. Blanks stay at the bottom in both directions. DoD is that day’s pGC minus the prior
-        calendar day (bps). Empty days are —.
+        Click a day to sort by that day’s pGC. WTD is this Sunday through today. Impact WTD is (WTD pGC − the
+        Rules target for this audience) × cc90, one decimal — same idea as dashboard 7699. Blanks stay at the
+        bottom in both directions. DoD is that day’s pGC minus the prior calendar day (bps). Empty days are —.
       </p>
     </div>
   )
