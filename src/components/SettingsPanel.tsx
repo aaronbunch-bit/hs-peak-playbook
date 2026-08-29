@@ -8,6 +8,14 @@ type Props = {
   settings: AppSettings
   onChange: (next: AppSettings) => void
   onClose: () => void
+  overflowAsOf?: string
+  overflowHs?: number
+  overflowK12?: number
+  overflowFromUpload?: boolean
+  overflowSource?: 'upload' | 'live' | 'snapshot'
+  overflowError?: string | null
+  onUploadOverflowCsv?: (text: string) => void
+  onClearOverflowUpload?: () => void
 }
 
 function PctInput({
@@ -38,7 +46,20 @@ function PctInput({
   )
 }
 
-export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
+export function SettingsPanel({
+  open,
+  settings,
+  onChange,
+  onClose,
+  overflowAsOf,
+  overflowHs,
+  overflowK12,
+  overflowFromUpload,
+  overflowSource,
+  overflowError,
+  onUploadOverflowCsv,
+  onClearOverflowUpload,
+}: Props) {
   if (!open) return null
   const t = settings.targets
   const curves = settings.lcCurves
@@ -64,6 +85,53 @@ export function SettingsPanel({ open, settings, onChange, onClose }: Props) {
         </div>
 
         <div className="space-y-8 px-5 py-5">
+          {onUploadOverflowCsv && (
+            <section>
+              <h3 className="text-sm font-semibold text-slate-800">Overflow Configs CSV</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Export the CSV from Overflow Configs and upload it here. Cross-trained membership updates for everyone
+                on Peak, not just this browser.
+              </p>
+              <p className="mt-2 text-xs text-slate-500">
+                {overflowAsOf
+                  ? `Using ${
+                      overflowSource === 'upload' || overflowFromUpload
+                        ? 'the shared upload'
+                        : overflowSource === 'live'
+                          ? 'live Overflow Configs'
+                          : 'the bundled list'
+                    } as of ${overflowAsOf}`
+                  : 'Using the bundled Overflow Configs list'}
+                {overflowHs != null && overflowK12 != null ? ` · ${overflowHs} HS-STEM · ${overflowK12} K12` : ''}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <label className="inline-flex cursor-pointer items-center rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800">
+                  Upload CSV
+                  <input
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      e.target.value = ''
+                      if (!file) return
+                      void file.text().then((text) => onUploadOverflowCsv(text))
+                    }}
+                  />
+                </label>
+                {overflowFromUpload && onClearOverflowUpload && (
+                  <button
+                    type="button"
+                    className="rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                    onClick={onClearOverflowUpload}
+                  >
+                    Clear shared list
+                  </button>
+                )}
+              </div>
+              {overflowError && <p className="mt-2 text-sm text-rose-600">{overflowError}</p>}
+            </section>
+          )}
           <section>
             <h3 className="text-sm font-semibold text-slate-800">pGC targets</h3>
             <p className="mt-1 text-sm text-slate-500">

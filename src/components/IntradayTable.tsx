@@ -37,6 +37,7 @@ type Props = {
   rows: IntradayRepRow[]
   selected: string | null
   asOf: string
+  chipsAsOf?: string
   emptyLabel?: string
   targetHs: number
   targetK12: number
@@ -49,6 +50,7 @@ export function IntradayTable({
   rows,
   selected,
   asOf,
+  chipsAsOf,
   emptyLabel,
   targetHs,
   targetK12,
@@ -207,7 +209,8 @@ export function IntradayTable({
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         Today so far{asOf ? ` · ${formatWeek(asOf)}` : ''}. Bucket pGC follows the Audience filter (chip-aware for
         Cross-trained on Super). HS/K12/Super columns stay full Looker audiences. Default sort is Super pGC low to
-        high. Cross-trained membership is Overflow Configs.
+        high. Cross-trained membership is Overflow Configs
+        {chipsAsOf ? ` as of ${formatWeek(chipsAsOf)}` : ''}.
       </p>
     </div>
   )

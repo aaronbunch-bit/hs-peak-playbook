@@ -99,6 +99,9 @@ export type RoutingRangePayload = {
   facts: RoutingFact[]
   /** Serialized Overflow Configs allowlist used for Cross-trained membership. */
   allowlist?: { hs: string[]; k12: string[] }
+  /** Calendar date the chips were last pulled (YYYY-MM-DD). */
+  allowlistAsOf?: string
+  allowlistSource?: 'upload' | 'live' | 'snapshot'
   empty?: boolean
   emptyReason?: string
 }
@@ -137,6 +140,8 @@ export type IntradayPayload = {
   asOf: string
   rows: IntradayRow[]
   allowlist?: { hs: string[]; k12: string[] }
+  allowlistAsOf?: string
+  allowlistSource?: 'upload' | 'live' | 'snapshot'
   empty?: boolean
   emptyReason?: string
 }

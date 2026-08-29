@@ -4,7 +4,8 @@ import { seed } from '../data/seed'
 import { emptyIntraday, parseIntradayCsv } from './intraday'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
-import { fetchOverflowAllowlist, serializeAllowlist, snapshotOverflowAllowlist } from './overflowAllowlist'
+import { resolveOverflowAllowlist, serializeAllowlist, snapshotAllowlistAsOf, snapshotOverflowAllowlist } from './overflowAllowlist'
+import { clearSharedOverflowChips, readSharedOverflowChips, writeSharedOverflowChips } from './overflowStore'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
 import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
@@ -287,6 +288,19 @@ export function payloadFromFacts(
   }
 }
 
+async function resolvedOverflow(): Promise<{
+  allowlist: ReturnType<typeof snapshotOverflowAllowlist>
+  asOf: string
+  source: 'upload' | 'live' | 'snapshot'
+}> {
+  const shared = await readSharedOverflowChips().catch(() => null)
+  return resolveOverflowAllowlist(shared).catch(() => ({
+    allowlist: snapshotOverflowAllowlist(),
+    asOf: snapshotAllowlistAsOf(),
+    source: 'snapshot' as const,
+  }))
+}
+
 async function runIntradayCsv(token: string, query: LookerQuery): Promise<string> {
   const filters: Record<string, string> = { ...(query.filters ?? {}) }
   delete filters['employee_directory.rd_name']
@@ -318,43 +332,58 @@ async function runIntradayCsv(token: string, query: LookerQuery): Promise<string
 }
 
 export async function fetchLookerIntraday(): Promise<IntradayPayload> {
+  const resolved = await resolvedOverflow()
+  const allowlistMeta = {
+    allowlist: serializeAllowlist(resolved.allowlist),
+    allowlistAsOf: resolved.asOf,
+    allowlistSource: resolved.source,
+  }
   if (!lookerConfigured()) {
-    return emptyIntraday('Looker is not configured. Set LOOKER_CLIENT_ID and LOOKER_CLIENT_SECRET.')
+    return {
+      ...emptyIntraday('Looker is not configured. Set LOOKER_CLIENT_ID and LOOKER_CLIENT_SECRET.'),
+      ...allowlistMeta,
+    }
   }
   const token = await login()
   const query = await lookQueryFor(token, intradayLookId())
-  const [csv, allowlist] = await Promise.all([
-    runIntradayCsv(token, query),
-    fetchOverflowAllowlist().catch(() => snapshotOverflowAllowlist()),
-  ])
-  const rows = parseIntradayCsv(csv, allowlist)
+  const csv = await runIntradayCsv(token, query)
+  const rows = parseIntradayCsv(csv, resolved.allowlist)
   if (rows.length === 0) {
-    return emptyIntraday('No people with HS/K12 CC90 yet today.')
+    return { ...emptyIntraday('No people with HS/K12 CC90 yet today.'), ...allowlistMeta }
   }
   return {
     source: `Looker look ${intradayLookId()}`,
     asOf: toIsoDate(new Date()),
     rows,
-    allowlist: serializeAllowlist(allowlist),
+    ...allowlistMeta,
   }
 }
 
 export async function fetchLookerRouting(from: string, to: string): Promise<RoutingRangePayload> {
   const range = clampRange(from, to)
+  const resolved = await resolvedOverflow()
+  const allowlistMeta = {
+    allowlist: serializeAllowlist(resolved.allowlist),
+    allowlistAsOf: resolved.asOf,
+    allowlistSource: resolved.source,
+  }
   if (!lookerConfigured()) {
-    return { ...range, facts: [], empty: true, emptyReason: 'Looker is not configured. Set LOOKER_CLIENT_ID and LOOKER_CLIENT_SECRET.' }
+    return {
+      ...range,
+      facts: [],
+      empty: true,
+      emptyReason: 'Looker is not configured. Set LOOKER_CLIENT_ID and LOOKER_CLIENT_SECRET.',
+      ...allowlistMeta,
+    }
   }
   const token = await login()
   const query = await lookQuery(token)
-  const [csv, allowlist] = await Promise.all([
-    runRoutingRange(token, query, range.start, range.end),
-    fetchOverflowAllowlist().catch(() => snapshotOverflowAllowlist()),
-  ])
+  const csv = await runRoutingRange(token, query, range.start, range.end)
   return {
     start: range.start,
     end: range.end,
-    facts: factsToRouting(parseLookerPlaybook(csv), allowlist),
-    allowlist: serializeAllowlist(allowlist),
+    facts: factsToRouting(parseLookerPlaybook(csv), resolved.allowlist),
+    ...allowlistMeta,
   }
 }
 
@@ -445,6 +474,31 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
   }
 
   try {
+    if (url.searchParams.get('view') === 'overflow-chips') {
+      if (req.method === 'POST') {
+        const raw = await req.json().catch(() => null)
+        if (raw == null || typeof raw !== 'object') {
+          return Response.json({ error: 'Upload a valid Overflow Configs CSV first.' }, { status: 400 })
+        }
+        try {
+          const chips = await writeSharedOverflowChips(raw)
+          return Response.json({ ...chips, source: 'upload' })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Could not save Overflow Configs chips.'
+          return Response.json({ error: message }, { status: 400 })
+        }
+      }
+      if (req.method === 'DELETE') {
+        await clearSharedOverflowChips()
+        return Response.json({ ok: true })
+      }
+      const resolved = await resolvedOverflow()
+      return Response.json({
+        asOf: resolved.asOf,
+        ...serializeAllowlist(resolved.allowlist),
+        source: resolved.source,
+      })
+    }
     if (url.searchParams.get('view') === 'intraday') {
       return Response.json(await fetchLookerIntraday())
     }
@@ -458,6 +512,9 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
     return Response.json(payload, { status: payload.empty ? 200 : 200 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Looker request failed'
+    if (url.searchParams.get('view') === 'overflow-chips') {
+      return Response.json({ error: message }, { status: 500 })
+    }
     if (url.searchParams.get('view') === 'intraday') {
       return Response.json(emptyIntraday(message))
     }

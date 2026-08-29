@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { comparePgcNullsLast, formatImpact, formatPgc, impactClass } from '../lib/pacer'
+import { comparePgcNullsLast, formatImpact, formatPgc, formatWeek, impactClass } from '../lib/pacer'
 import type { RoutingRepRow } from '../lib/routing'
 import type { LcCurves } from '../lib/settings'
 import type { Slice } from '../lib/types'
@@ -42,6 +42,7 @@ type Props = {
   lcCurves: LcCurves
   periodLabel: string
   groupLabel: string
+  chipsAsOf?: string
   onSelect: (name: string) => void
 }
 
@@ -53,6 +54,7 @@ export function RoutingTable({
   lcCurves,
   periodLabel,
   groupLabel,
+  chipsAsOf,
   onSelect,
 }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('pgc')
@@ -167,7 +169,8 @@ export function RoutingTable({
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         {periodLabel} · {groupLabel}. Group block is sold ÷ HS/K12 cc90 for the bucket, not an average of
-        averages. Cross-trained is Overflow Configs dedicated CT for this audience. Impact is (pGC − the Rules
+        averages. Cross-trained is Overflow Configs dedicated CT
+        {chipsAsOf ? ` as of ${formatWeek(chipsAsOf)}` : ''}. Impact is (pGC − the Rules
         target) × cc90, one decimal. Blanks sort last.
       </p>
     </div>

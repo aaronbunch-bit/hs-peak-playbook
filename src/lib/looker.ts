@@ -4,12 +4,56 @@ import { daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDa
 import { factHasSlice, factToWeekly } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import { emptyIntraday } from './intraday'
-import { serializeAllowlist, snapshotOverflowAllowlist } from './overflowAllowlist'
+import { serializeAllowlist, snapshotAllowlistAsOf, snapshotOverflowAllowlist } from './overflowAllowlist'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
 import type { IntradayPayload, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
+import type { UploadedOverflowChips } from './overflowCsv'
 
 export { emptyPayload, SLICE_LOOKER_FILTERS }
+
+export type OverflowChipsPayload = UploadedOverflowChips & {
+  source: 'upload' | 'live' | 'snapshot'
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const token = await getSiteAccessToken()
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
+
+export async function fetchOverflowChips(): Promise<OverflowChipsPayload | null> {
+  try {
+    const res = await fetch('/.netlify/functions/looker?view=overflow-chips', { headers: await authHeaders() })
+    if (!res.ok) return null
+    return (await res.json()) as OverflowChipsPayload
+  } catch {
+    return null
+  }
+}
+
+export async function saveOverflowChips(chips: UploadedOverflowChips): Promise<OverflowChipsPayload> {
+  const res = await fetch('/.netlify/functions/looker?view=overflow-chips', {
+    method: 'POST',
+    headers: { ...(await authHeaders()), 'Content-Type': 'application/json' },
+    body: JSON.stringify(chips),
+  })
+  const body = (await res.json().catch(() => ({}))) as { error?: string } & Partial<OverflowChipsPayload>
+  if (!res.ok) throw new Error(body.error ?? 'Could not save Overflow Configs chips.')
+  return body as OverflowChipsPayload
+}
+
+export async function clearOverflowChips(): Promise<void> {
+  const res = await fetch('/.netlify/functions/looker?view=overflow-chips', {
+    method: 'DELETE',
+    headers: await authHeaders(),
+  })
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string }
+    throw new Error(body.error ?? 'Could not clear Overflow Configs chips.')
+  }
+}
 
 export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary'): Promise<PacerPayload> {
   try {
@@ -92,6 +136,9 @@ export async function fetchRoutingData(start: string, end: string): Promise<Rout
           facts: data.facts,
           empty: data.empty,
           emptyReason: data.emptyReason,
+          allowlist: data.allowlist,
+          allowlistAsOf: data.allowlistAsOf,
+          allowlistSource: data.allowlistSource,
         }
       }
     }
@@ -112,7 +159,13 @@ export async function fetchRoutingData(start: string, end: string): Promise<Rout
   const inRange = seed.facts.filter((f) => f.week >= range.start && f.week <= range.end)
   const facts = inRange.length ? inRange : seed.facts
   const allowlist = snapshotOverflowAllowlist()
-  return { ...range, facts: factsToRouting(facts, allowlist), allowlist: serializeAllowlist(allowlist) }
+  return {
+    ...range,
+    facts: factsToRouting(facts, allowlist),
+    allowlist: serializeAllowlist(allowlist),
+    allowlistAsOf: snapshotAllowlistAsOf(),
+    allowlistSource: 'snapshot',
+  }
 }
 
 export async function fetchIntradayData(): Promise<IntradayPayload> {

@@ -23,7 +23,7 @@ import {
 } from './lib/focus'
 import { loadNotes, noteFor, notesForRep, saveNotes, setNote } from './lib/notes'
 import { readHash, staffingAllowed, weekCursorFromHash, writeHash, type AppTab } from './lib/hash'
-import { fetchIntradayData, fetchPacerData, fetchRoutingData, SLICE_LOOKER_FILTERS } from './lib/looker'
+import { fetchIntradayData, fetchOverflowChips, fetchPacerData, fetchRoutingData, saveOverflowChips, clearOverflowChips, SLICE_LOOKER_FILTERS, type OverflowChipsPayload } from './lib/looker'
 import { buildIntradayRows } from './lib/intraday'
 import { buildDailyRows, buildRows, formatDateRange, formatWeek, mergeFocusLog, weekKpis, wtdKpis } from './lib/pacer'
 import {
@@ -35,6 +35,8 @@ import {
 import { hideRep, loadHiddenReps, saveHiddenReps, showRep } from './lib/hidden'
 import { loadSettings, saveSettings, targetForSlice, type AppSettings } from './lib/settings'
 import { suggestFocuses } from './lib/suggest'
+import { snapshotAllowlistAsOf, snapshotOverflowAllowlist } from './lib/overflowAllowlist'
+import { parseOverflowConfigsCsv } from './lib/overflowCsv'
 import { ROUTING_GROUP_META, ROUTING_OVERALL_META } from './data/routingGroups'
 import { buildRoutingRows, routingGroupStats, type RoutingRepRow } from './lib/routing'
 import { clampRange, rangeForRoutingPeriod } from './lib/routingRange'
@@ -121,10 +123,13 @@ export default function App() {
   const [routingStart, setRoutingStart] = useState(initial.routingFrom)
   const [routingEnd, setRoutingEnd] = useState(initial.routingTo)
   const [routingFacts, setRoutingFacts] = useState<RoutingFact[]>([])
+  const [routingAllowlistAsOf, setRoutingAllowlistAsOf] = useState<string | undefined>()
   const [routingLoading, setRoutingLoading] = useState(false)
   const [routingError, setRoutingError] = useState<string | null>(null)
   const [intraday, setIntraday] = useState<IntradayPayload | null>(null)
   const [intradayLoading, setIntradayLoading] = useState(false)
+  const [overflowMeta, setOverflowMeta] = useState<OverflowChipsPayload | null>(null)
+  const [overflowUploadError, setOverflowUploadError] = useState<string | null>(null)
 
   const focusWeek = sundayWeekStart()
   const targetPgc = targetForSlice(slice, settings.targets)
@@ -146,6 +151,9 @@ export default function App() {
   }, [payload, rosterLevels])
 
   const hiddenSet = useMemo(() => new Set(hiddenReps), [hiddenReps])
+
+  const chipsAsOf = overflowMeta?.asOf ?? routingAllowlistAsOf ?? snapshotAllowlistAsOf()
+  const snapshot = snapshotOverflowAllowlist()
 
   const routingRowsAll = useMemo(() => {
     return buildRoutingRows(routingFacts, slice, targetPgc, settings.lcCurves, livePayload?.roster ?? [])
@@ -217,6 +225,17 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false
+    fetchOverflowChips().then((meta) => {
+      if (cancelled || !meta) return
+      setOverflowMeta(meta)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [reload])
+
+  useEffect(() => {
+    let cancelled = false
     setPlaybookLoading(true)
     fetchPacerData(slice, staffingAllowed(slice) ? staffing : 'primary').then((data) => {
       if (cancelled) return
@@ -242,6 +261,15 @@ export default function App() {
       .then((data) => {
         if (cancelled) return
         setRoutingFacts(data.facts)
+        setRoutingAllowlistAsOf(data.allowlistAsOf)
+        if (data.allowlist) {
+          setOverflowMeta({
+            asOf: data.allowlistAsOf ?? snapshotAllowlistAsOf(),
+            hs: data.allowlist.hs,
+            k12: data.allowlist.k12,
+            source: data.allowlistSource ?? 'snapshot',
+          })
+        }
         setRoutingError(data.empty ? (data.emptyReason ?? 'No rows for this range.') : null)
         setRoutingLoading(false)
         setUpdatedAt(Date.now())
@@ -269,6 +297,14 @@ export default function App() {
       .then((data) => {
         if (cancelled) return
         setIntraday(data)
+        if (data.allowlist) {
+          setOverflowMeta({
+            asOf: data.allowlistAsOf ?? snapshotAllowlistAsOf(),
+            hs: data.allowlist.hs,
+            k12: data.allowlist.k12,
+            source: data.allowlistSource ?? 'snapshot',
+          })
+        }
         setIntradayLoading(false)
         setUpdatedAt(Date.now())
       })
@@ -539,6 +575,34 @@ export default function App() {
     saveSettings(next)
   }
 
+  const onUploadOverflowCsv = (text: string) => {
+    try {
+      const parsed = parseOverflowConfigsCsv(text)
+      setOverflowUploadError(null)
+      void saveOverflowChips(parsed)
+        .then((meta) => {
+          setOverflowMeta(meta)
+          setReload((n) => n + 1)
+        })
+        .catch((err) => {
+          setOverflowUploadError(err instanceof Error ? err.message : 'Could not save that CSV for everyone.')
+        })
+    } catch (err) {
+      setOverflowUploadError(err instanceof Error ? err.message : 'Could not read that CSV.')
+    }
+  }
+
+  const onClearOverflowUpload = () => {
+    setOverflowUploadError(null)
+    void clearOverflowChips()
+      .then(() => {
+        setReload((n) => n + 1)
+      })
+      .catch((err) => {
+        setOverflowUploadError(err instanceof Error ? err.message : 'Could not clear the shared list.')
+      })
+  }
+
   const onSetLevel = (name: string, level: string | null) => {
     const next = setRosterLevel(rosterLevels, name, level)
     setRosterLevels(next)
@@ -642,6 +706,7 @@ export default function App() {
                 lcCurves={settings.lcCurves}
                 periodLabel={formatDateRange(routingStart, routingEnd)}
                 groupLabel={groupLabel(routingGroup)}
+                chipsAsOf={chipsAsOf}
                 onSelect={setSelected}
               />
             )}
@@ -673,6 +738,7 @@ export default function App() {
                 rows={intradayDetailRows}
                 selected={selected}
                 asOf={intraday?.asOf ?? ''}
+                chipsAsOf={overflowMeta?.asOf ?? intraday?.allowlistAsOf}
                 emptyLabel={groupLabel(routingGroup)}
                 targetHs={targetForSlice('hs-stem', settings.targets)}
                 targetK12={targetForSlice('k12tp', settings.targets)}
@@ -807,6 +873,14 @@ export default function App() {
         settings={settings}
         onChange={onSettings}
         onClose={() => setSettingsOpen(false)}
+        overflowAsOf={chipsAsOf}
+        overflowHs={overflowMeta?.hs.length ?? snapshot.hs.size}
+        overflowK12={overflowMeta?.k12.length ?? snapshot.k12.size}
+        overflowFromUpload={overflowMeta?.source === 'upload'}
+        overflowSource={overflowMeta?.source}
+        overflowError={overflowUploadError}
+        onUploadOverflowCsv={onUploadOverflowCsv}
+        onClearOverflowUpload={onClearOverflowUpload}
       />
     </div>
   )

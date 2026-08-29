@@ -14,6 +14,12 @@ export type DedicatedChips = {
   dedicatedK12: boolean
 }
 
+export type ResolvedOverflowAllowlist = {
+  allowlist: OverflowAllowlist
+  asOf: string
+  source: 'upload' | 'live' | 'snapshot'
+}
+
 const EMPTY: OverflowAllowlist = { hs: new Set(), k12: new Set() }
 
 function env(name: string): string {
@@ -26,8 +32,20 @@ function nameKey(name: string): string {
   return canonical.toLowerCase()
 }
 
+function todayIso(): string {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
 export function emptyOverflowAllowlist(): OverflowAllowlist {
   return { hs: new Set(), k12: new Set() }
+}
+
+export function snapshotAllowlistAsOf(): string {
+  return OVERFLOW_CONFIGS_ALLOWLIST.asOf
 }
 
 /** High School chips from Overflow Configs (bundled; used when live read is empty). */
@@ -43,6 +61,16 @@ export function chipsForName(allowlist: OverflowAllowlist, name: string): Dedica
   }
 }
 
+export function overlayDedicatedChips<T extends { name: string; dedicatedHs: boolean; dedicatedK12: boolean }>(
+  rows: T[],
+  allowlist: OverflowAllowlist,
+): T[] {
+  return rows.map((row) => {
+    const chips = chipsForName(allowlist, row.name)
+    return { ...row, dedicatedHs: chips.dedicatedHs, dedicatedK12: chips.dedicatedK12 }
+  })
+}
+
 export function supabaseConfigured(): boolean {
   const url = env('SUPABASE_URL') || env('VITE_SUPABASE_URL')
   const key = env('SUPABASE_SERVICE_ROLE_KEY') || env('SUPABASE_ANON_KEY') || env('VITE_SUPABASE_ANON_KEY')
@@ -50,13 +78,25 @@ export function supabaseConfigured(): boolean {
 }
 
 /**
- * Dedicated CT chips: Overflow Configs High School list.
- * Tries a live table read when env is set; otherwise uses the Overflow Configs snapshot.
+ * Dedicated CT chips: live Overflow Configs table when it returns rows,
+ * otherwise the last morning snapshot.
  */
 export async function fetchOverflowAllowlist(): Promise<OverflowAllowlist> {
+  const resolved = await resolveOverflowAllowlist()
+  return resolved.allowlist
+}
+
+export async function resolveOverflowAllowlist(
+  shared?: { hs: string[]; k12: string[]; asOf: string } | null,
+): Promise<ResolvedOverflowAllowlist> {
+  if (shared && (shared.hs.length > 0 || shared.k12.length > 0)) {
+    return { allowlist: deserializeAllowlist(shared), asOf: shared.asOf, source: 'upload' }
+  }
   const live = await fetchLiveAllowlist().catch(() => null)
-  if (live && (live.hs.size > 0 || live.k12.size > 0)) return live
-  return snapshotOverflowAllowlist()
+  if (live && (live.hs.size > 0 || live.k12.size > 0)) {
+    return { allowlist: live, asOf: todayIso(), source: 'live' }
+  }
+  return { allowlist: snapshotOverflowAllowlist(), asOf: snapshotAllowlistAsOf(), source: 'snapshot' }
 }
 
 async function fetchLiveAllowlist(): Promise<OverflowAllowlist | null> {

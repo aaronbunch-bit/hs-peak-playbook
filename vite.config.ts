@@ -4,6 +4,15 @@ import tailwindcss from '@tailwindcss/vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
 
+function readRequestBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)))
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
 function lookerDevPlugin(env: Record<string, string>): Plugin {
   return {
     name: 'looker-dev',
@@ -29,12 +38,20 @@ function lookerDevPlugin(env: Record<string, string>): Plugin {
           const headers = new Headers()
           const auth = req.headers.authorization
           if (auth) headers.set('Authorization', Array.isArray(auth) ? auth[0] : auth)
-          const request = new Request(new URL(url, origin).toString(), { method: req.method, headers })
+          const contentType = req.headers['content-type']
+          if (contentType) headers.set('Content-Type', Array.isArray(contentType) ? contentType[0] : contentType)
+          const method = req.method ?? 'GET'
+          const body = method === 'GET' || method === 'HEAD' ? undefined : await readRequestBody(req)
+          const request = new Request(new URL(url, origin).toString(), {
+            method,
+            headers,
+            body,
+          })
           const response = await mod.handleLookerRequest(request) as Response
-          const body = await response.text()
+          const text = await response.text()
           res.statusCode = response.status
           res.setHeader('Content-Type', response.headers.get('Content-Type') ?? 'application/json')
-          res.end(body)
+          res.end(text)
         } catch (err) {
           res.statusCode = 500
           res.setHeader('Content-Type', 'application/json')
