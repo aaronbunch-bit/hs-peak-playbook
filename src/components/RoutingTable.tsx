@@ -167,8 +167,8 @@ export function RoutingTable({
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
         {periodLabel} · {groupLabel}. Group block is sold ÷ HS/K12 cc90 for the bucket, not an average of
-        averages. Impact is (pGC − the Rules target for this audience) × cc90, one decimal — same idea as
-        dashboard 7699. Blanks sort last.
+        averages. Cross-trained is Overflow Configs dedicated CT for this audience. Impact is (pGC − the Rules
+        target) × cc90, one decimal. Blanks sort last.
       </p>
     </div>
   )

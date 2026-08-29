@@ -1,6 +1,7 @@
 import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
 import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
 import { impliedImpact } from './lookerExport'
+import { chipsForName, type OverflowAllowlist } from './overflowAllowlist'
 import { clientImpact } from './pacer'
 import { expectedPgc, type LcCurves } from './settings'
 import type { LookerFact, RoutingFact, RoutingGroup, Slice } from './types'
@@ -17,6 +18,8 @@ export type RoutingRepRow = {
   level: string | null
   expectedPgc: number
   routingGroup: RoutingGroup
+  dedicatedHs: boolean
+  dedicatedK12: boolean
   pgc: number | null
   cc90: number
   sold: number
@@ -40,11 +43,12 @@ function hasHsK12Volume(fact: Pick<LookerFact, 'hsCc90' | 'k12Cc90' | 'hsPgc' | 
   )
 }
 
-export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
+export function factsToRouting(facts: LookerFact[], allowlist: OverflowAllowlist): RoutingFact[] {
   type Acc = {
     name: string
     manager: string | null
-    routingGroup: RoutingGroup
+    dedicatedHs: boolean
+    dedicatedK12: boolean
     hsSold: number
     hsImpact: number
     hsCc90: number
@@ -58,8 +62,11 @@ export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
   for (const fact of ordered) {
     const name = canonicalHighSchoolName(fact.name) ?? fact.name.trim()
     if (!name || !hasHsK12Volume(fact)) continue
-    const routingGroup = assignRoutingGroup(name, fact.manager)
-    if (routingGroup === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
+    const chips = chipsForName(allowlist, name)
+    // Exclude overflow-blocked managers unless they land in Primary / Training / Cross-trained on some slice.
+    // Final group is slice-aware in buildRoutingRows; here we only drop people who can never be CT/Primary/Training.
+    const provisional = assignRoutingGroup(name, fact.manager, chips, 'supergroup')
+    if (provisional === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
     const key = name.toLowerCase()
     const hsSold = (fact.hsPgc ?? 0) * fact.hsCc90
     const k12Sold = (fact.k12Pgc ?? 0) * fact.k12Cc90
@@ -70,7 +77,8 @@ export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
       byName.set(key, {
         name,
         manager: fact.manager,
-        routingGroup,
+        dedicatedHs: chips.dedicatedHs,
+        dedicatedK12: chips.dedicatedK12,
         hsSold,
         hsImpact,
         hsCc90: fact.hsCc90,
@@ -88,14 +96,16 @@ export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
     prev.k12Impact += k12Impact
     prev.k12Cc90 += fact.k12Cc90
     prev.manager = fact.manager
-    prev.routingGroup = routingGroup
+    prev.dedicatedHs = chips.dedicatedHs
+    prev.dedicatedK12 = chips.dedicatedK12
     prev.date = fact.week
   }
   return [...byName.values()].map((row) => ({
     date: row.date,
     name: row.name,
     manager: row.manager,
-    routingGroup: row.routingGroup,
+    dedicatedHs: row.dedicatedHs,
+    dedicatedK12: row.dedicatedK12,
     hsCc90: row.hsCc90,
     hsPgc: row.hsCc90 > 0 ? row.hsSold / row.hsCc90 : null,
     hsImpact: row.hsImpact,
@@ -106,15 +116,17 @@ export function factsToRouting(facts: LookerFact[]): RoutingFact[] {
   }))
 }
 
-/** Slice volume for pGC. Super is HS + K12. Closed Client Count is sold, not 7699 impact. */
-export function volumeForSlice(fact: RoutingFact, slice: Slice): RoutingVolume {
-  if (slice === 'hs-stem') {
+function audienceVolume(
+  fact: RoutingFact,
+  kind: 'hs' | 'k12' | 'super',
+): RoutingVolume {
+  if (kind === 'hs') {
     const cc90 = fact.hsCc90
     const closedClients = fact.hsImpact
     const sold = closedClients > 0 ? closedClients : (fact.hsPgc ?? 0) * cc90
     return { sold, cc90, pgc: fact.hsPgc ?? (cc90 > 0 ? sold / cc90 : null) }
   }
-  if (slice === 'k12tp') {
+  if (kind === 'k12') {
     const cc90 = fact.k12Cc90
     const closedClients = fact.k12Impact
     const sold = closedClients > 0 ? closedClients : (fact.k12Pgc ?? 0) * cc90
@@ -124,6 +136,21 @@ export function volumeForSlice(fact: RoutingFact, slice: Slice): RoutingVolume {
   const closedClients = fact.hsImpact + fact.k12Impact
   const sold = closedClients > 0 ? closedClients : (fact.hsPgc ?? 0) * fact.hsCc90 + (fact.k12Pgc ?? 0) * fact.k12Cc90
   return { sold, cc90, pgc: fact.totalPgc ?? (cc90 > 0 ? sold / cc90 : null) }
+}
+
+/**
+ * Slice volume for pGC. Cross-trained on Supergroup uses only dedicated audiences
+ * (HS-only, K12-only, or both when both chips are set).
+ */
+export function volumeForSlice(fact: RoutingFact, slice: Slice, routingGroup: RoutingGroup): RoutingVolume {
+  if (slice === 'hs-stem') return audienceVolume(fact, 'hs')
+  if (slice === 'k12tp') return audienceVolume(fact, 'k12')
+  if (routingGroup === 'cross-trained') {
+    if (fact.dedicatedHs && fact.dedicatedK12) return audienceVolume(fact, 'super')
+    if (fact.dedicatedHs) return audienceVolume(fact, 'hs')
+    if (fact.dedicatedK12) return audienceVolume(fact, 'k12')
+  }
+  return audienceVolume(fact, 'super')
 }
 
 export function buildRoutingRows(
@@ -136,9 +163,11 @@ export function buildRoutingRows(
   const byName = new Map(roster.map((r) => [r.name, r]))
   const rows: RoutingRepRow[] = []
   for (const fact of facts) {
-    const vol = volumeForSlice(fact, slice)
+    const chips = { dedicatedHs: fact.dedicatedHs, dedicatedK12: fact.dedicatedK12 }
+    const routingGroup = assignRoutingGroup(fact.name, fact.manager, chips, slice)
+    if (routingGroup === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
+    const vol = volumeForSlice(fact, slice, routingGroup)
     if (vol.cc90 <= 0 && vol.pgc == null) continue
-    if (fact.routingGroup === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
     const rosterRow = byName.get(fact.name)
     const level = rosterRow?.level ?? null
     rows.push({
@@ -146,7 +175,9 @@ export function buildRoutingRows(
       manager: rosterRow?.manager ?? fact.manager,
       level,
       expectedPgc: expectedPgc(targetPgc, level, lcCurves),
-      routingGroup: fact.routingGroup,
+      routingGroup,
+      dedicatedHs: fact.dedicatedHs,
+      dedicatedK12: fact.dedicatedK12,
       pgc: vol.pgc,
       cc90: vol.cc90,
       sold: vol.sold,

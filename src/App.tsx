@@ -385,9 +385,15 @@ export default function App() {
   }, [livePayload, focus, targetPgc, staffing, settings.lcCurves])
 
   const intradayRowsAll = useMemo(() => {
-    const built = buildIntradayRows(intraday?.rows ?? [], livePayload?.roster ?? [], settings.targets, settings.lcCurves)
+    const built = buildIntradayRows(
+      intraday?.rows ?? [],
+      livePayload?.roster ?? [],
+      settings.targets,
+      settings.lcCurves,
+      slice,
+    )
     return built.filter((r) => r.routingGroup !== 'primary' || !hiddenSet.has(r.name))
-  }, [intraday, livePayload, settings.targets, settings.lcCurves, hiddenSet])
+  }, [intraday, livePayload, settings.targets, settings.lcCurves, hiddenSet, slice])
 
   const intradayRows = useMemo(
     () => (manager ? intradayRowsAll.filter((r) => r.manager === manager) : intradayRowsAll),
@@ -397,8 +403,8 @@ export default function App() {
   const intradayVolume = useMemo(
     () =>
       intradayRows.map((r) => ({
-        sold: (r.superPgc ?? 0) * r.superCc90,
-        cc90: r.superCc90,
+        sold: r.bucketSold,
+        cc90: r.bucketCc90,
         routingGroup: r.routingGroup,
       })),
     [intradayRows],

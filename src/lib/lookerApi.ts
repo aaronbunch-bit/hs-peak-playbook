@@ -4,6 +4,7 @@ import { seed } from '../data/seed'
 import { emptyIntraday, parseIntradayCsv } from './intraday'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
+import { fetchOverflowAllowlist, serializeAllowlist, snapshotOverflowAllowlist } from './overflowAllowlist'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
 import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
@@ -322,7 +323,11 @@ export async function fetchLookerIntraday(): Promise<IntradayPayload> {
   }
   const token = await login()
   const query = await lookQueryFor(token, intradayLookId())
-  const rows = parseIntradayCsv(await runIntradayCsv(token, query))
+  const [csv, allowlist] = await Promise.all([
+    runIntradayCsv(token, query),
+    fetchOverflowAllowlist().catch(() => snapshotOverflowAllowlist()),
+  ])
+  const rows = parseIntradayCsv(csv, allowlist)
   if (rows.length === 0) {
     return emptyIntraday('No people with HS/K12 CC90 yet today.')
   }
@@ -330,6 +335,7 @@ export async function fetchLookerIntraday(): Promise<IntradayPayload> {
     source: `Looker look ${intradayLookId()}`,
     asOf: toIsoDate(new Date()),
     rows,
+    allowlist: serializeAllowlist(allowlist),
   }
 }
 
@@ -340,8 +346,16 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
   }
   const token = await login()
   const query = await lookQuery(token)
-  const csv = await runRoutingRange(token, query, range.start, range.end)
-  return { start: range.start, end: range.end, facts: factsToRouting(parseLookerPlaybook(csv)) }
+  const [csv, allowlist] = await Promise.all([
+    runRoutingRange(token, query, range.start, range.end),
+    fetchOverflowAllowlist().catch(() => snapshotOverflowAllowlist()),
+  ])
+  return {
+    start: range.start,
+    end: range.end,
+    facts: factsToRouting(parseLookerPlaybook(csv), allowlist),
+    allowlist: serializeAllowlist(allowlist),
+  }
 }
 
 export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Promise<PacerPayload> {

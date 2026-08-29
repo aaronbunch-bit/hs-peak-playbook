@@ -3,9 +3,10 @@ import { getSiteAccessToken } from './auth'
 import { daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import { factHasSlice, factToWeekly } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
+import { emptyIntraday } from './intraday'
+import { serializeAllowlist, snapshotOverflowAllowlist } from './overflowAllowlist'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
-import { emptyIntraday } from './intraday'
 import type { IntradayPayload, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
 export { emptyPayload, SLICE_LOOKER_FILTERS }
@@ -110,7 +111,8 @@ export async function fetchRoutingData(start: string, end: string): Promise<Rout
   const { seed } = await import('../data/seed')
   const inRange = seed.facts.filter((f) => f.week >= range.start && f.week <= range.end)
   const facts = inRange.length ? inRange : seed.facts
-  return { ...range, facts: factsToRouting(facts) }
+  const allowlist = snapshotOverflowAllowlist()
+  return { ...range, facts: factsToRouting(facts, allowlist), allowlist: serializeAllowlist(allowlist) }
 }
 
 export async function fetchIntradayData(): Promise<IntradayPayload> {

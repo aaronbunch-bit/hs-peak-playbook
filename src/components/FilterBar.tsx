@@ -317,6 +317,21 @@ export function FilterBar({
 
         {tab === 'intraday' && (
           <div className="mt-3 flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl surface px-3.5 py-3">
+            <Field label="Audience">
+              <Seg>
+                {SLICES.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    className="seg-btn px-2.5 py-1 text-xs"
+                    data-on={slice === s.id}
+                    onClick={() => onSlice(s.id)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </Seg>
+            </Field>
             <Field label="Window">
               <span className="h-[30px] inline-flex items-center rounded-lg bg-slate-100 px-2.5 text-xs font-semibold text-slate-800">
                 Today so far
@@ -336,7 +351,9 @@ export function FilterBar({
                 ))}
               </select>
             </Field>
-            <p className="pb-1 text-xs text-slate-500">Click a bucket. Super pGC is today’s HS + K12 sold ÷ cc90.</p>
+            <p className="pb-1 text-xs text-slate-500">
+              Click a bucket. Cross-trained follows Overflow Configs chips for this audience.
+            </p>
           </div>
         )}
 

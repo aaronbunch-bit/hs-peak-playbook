@@ -80,7 +80,10 @@ export type RoutingFact = {
   date: string
   name: string
   manager: string | null
-  routingGroup: RoutingGroup
+  /** Overflow Configs HS-STEM chip (dedicated cross-train). */
+  dedicatedHs: boolean
+  /** Overflow Configs K12 Test Prep chip (dedicated cross-train). */
+  dedicatedK12: boolean
   hsCc90: number
   hsPgc: number | null
   hsImpact: number
@@ -94,6 +97,8 @@ export type RoutingRangePayload = {
   start: string
   end: string
   facts: RoutingFact[]
+  /** Serialized Overflow Configs allowlist used for Cross-trained membership. */
+  allowlist?: { hs: string[]; k12: string[] }
   empty?: boolean
   emptyReason?: string
 }
@@ -102,17 +107,26 @@ export type RoutingRangePayload = {
 export type IntradayRow = {
   name: string
   manager: string | null
-  routingGroup: RoutingGroup
+  dedicatedHs: boolean
+  dedicatedK12: boolean
   hsPgc: number | null
   hsCc90: number
   k12Pgc: number | null
   k12Cc90: number
+  /** Full HS+K12 Super; chip-aware Super is applied when building IntradayRepRow for a slice. */
   superPgc: number | null
   superCc90: number
+  hsSold: number
+  k12Sold: number
 }
 
 export type IntradayRepRow = IntradayRow & {
   level: string | null
+  routingGroup: RoutingGroup
+  /** Slice- and chip-aware volume for bucket pGC (not the HS/K12/Super table columns). */
+  bucketSold: number
+  bucketCc90: number
+  bucketPgc: number | null
   expectedHs: number
   expectedK12: number
   expectedSuper: number
@@ -122,6 +136,7 @@ export type IntradayPayload = {
   source: string
   asOf: string
   rows: IntradayRow[]
+  allowlist?: { hs: string[]; k12: string[] }
   empty?: boolean
   emptyReason?: string
 }

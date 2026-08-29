@@ -2,8 +2,9 @@ import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
 import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
 import { toIsoDate } from './calendar'
 import { canonicalManager, parseCsv } from './lookerExport'
+import { chipsForName, type OverflowAllowlist } from './overflowAllowlist'
 import { expectedPgc, type LcCurves, type Targets, targetForSlice } from './settings'
-import type { IntradayPayload, IntradayRepRow, IntradayRow } from './types'
+import type { IntradayPayload, IntradayRepRow, IntradayRow, Slice } from './types'
 
 export function emptyIntraday(reason: string): IntradayPayload {
   return {
@@ -47,7 +48,7 @@ function pgc(sold: number, cc90: number): number | null {
   return sold / cc90
 }
 
-export function parseIntradayCsv(csv: string): IntradayRow[] {
+export function parseIntradayCsv(csv: string, allowlist: OverflowAllowlist): IntradayRow[] {
   const table = parseCsv(csv)
   if (table.length < 2) return []
   const headers = table[0]
@@ -96,23 +97,49 @@ export function parseIntradayCsv(csv: string): IntradayRow[] {
 
   return [...byName.values()]
     .map((row) => {
-      const routingGroup = assignRoutingGroup(row.name, row.manager)
-      if (routingGroup === 'overflow' && isOverflowExcludedManager(row.manager)) return null
+      const chips = chipsForName(allowlist, row.name)
+      const provisional = assignRoutingGroup(row.name, row.manager, chips, 'supergroup')
+      if (provisional === 'overflow' && isOverflowExcludedManager(row.manager)) return null
       const superCc90 = row.hsCc90 + row.k12Cc90
       const superSold = row.hsSold + row.k12Sold
+      if (superCc90 <= 0) return null
       return {
         name: row.name,
         manager: row.manager,
-        routingGroup,
+        dedicatedHs: chips.dedicatedHs,
+        dedicatedK12: chips.dedicatedK12,
         hsPgc: pgc(row.hsSold, row.hsCc90),
         hsCc90: row.hsCc90,
         k12Pgc: pgc(row.k12Sold, row.k12Cc90),
         k12Cc90: row.k12Cc90,
         superPgc: pgc(superSold, superCc90),
         superCc90,
+        hsSold: row.hsSold,
+        k12Sold: row.k12Sold,
       }
     })
-    .filter((row): row is IntradayRow => row != null && row.superCc90 > 0)
+    .filter((row): row is IntradayRow => row != null)
+}
+
+function bucketVolume(
+  row: IntradayRow,
+  slice: Slice,
+  routingGroup: ReturnType<typeof assignRoutingGroup>,
+): { sold: number; cc90: number; pgc: number | null } {
+  if (slice === 'hs-stem') {
+    return { sold: row.hsSold, cc90: row.hsCc90, pgc: row.hsPgc }
+  }
+  if (slice === 'k12tp') {
+    return { sold: row.k12Sold, cc90: row.k12Cc90, pgc: row.k12Pgc }
+  }
+  if (routingGroup === 'cross-trained') {
+    if (row.dedicatedHs && row.dedicatedK12) {
+      return { sold: row.hsSold + row.k12Sold, cc90: row.superCc90, pgc: row.superPgc }
+    }
+    if (row.dedicatedHs) return { sold: row.hsSold, cc90: row.hsCc90, pgc: row.hsPgc }
+    if (row.dedicatedK12) return { sold: row.k12Sold, cc90: row.k12Cc90, pgc: row.k12Pgc }
+  }
+  return { sold: row.hsSold + row.k12Sold, cc90: row.superCc90, pgc: row.superPgc }
 }
 
 export function buildIntradayRows(
@@ -120,18 +147,31 @@ export function buildIntradayRows(
   roster: Array<{ name: string; manager: string | null; level: string | null }>,
   targets: Targets,
   lcCurves: LcCurves,
+  slice: Slice,
 ): IntradayRepRow[] {
   const byName = new Map(roster.map((r) => [r.name, r]))
-  return rows.map((row) => {
-    const rosterRow = byName.get(row.name)
-    const level = rosterRow?.level ?? null
-    return {
-      ...row,
-      manager: rosterRow?.manager ?? row.manager,
-      level,
-      expectedHs: expectedPgc(targetForSlice('hs-stem', targets), level, lcCurves),
-      expectedK12: expectedPgc(targetForSlice('k12tp', targets), level, lcCurves),
-      expectedSuper: expectedPgc(targetForSlice('supergroup', targets), level, lcCurves),
-    }
-  })
+  return rows
+    .map((row) => {
+      const rosterRow = byName.get(row.name)
+      const level = rosterRow?.level ?? null
+      const manager = rosterRow?.manager ?? row.manager
+      const chips = { dedicatedHs: row.dedicatedHs, dedicatedK12: row.dedicatedK12 }
+      const routingGroup = assignRoutingGroup(row.name, manager, chips, slice)
+      if (routingGroup === 'overflow' && isOverflowExcludedManager(manager)) return null
+      const bucket = bucketVolume(row, slice, routingGroup)
+      if (bucket.cc90 <= 0 && bucket.pgc == null) return null
+      return {
+        ...row,
+        manager,
+        level,
+        routingGroup,
+        bucketSold: bucket.sold,
+        bucketCc90: bucket.cc90,
+        bucketPgc: bucket.pgc,
+        expectedHs: expectedPgc(targetForSlice('hs-stem', targets), level, lcCurves),
+        expectedK12: expectedPgc(targetForSlice('k12tp', targets), level, lcCurves),
+        expectedSuper: expectedPgc(targetForSlice('supergroup', targets), level, lcCurves),
+      }
+    })
+    .filter((row): row is IntradayRepRow => row != null)
 }

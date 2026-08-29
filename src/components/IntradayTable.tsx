@@ -205,9 +205,9 @@ export function IntradayTable({
         </table>
       </div>
       <p className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-400">
-        Today so far{asOf ? ` · ${formatWeek(asOf)}` : ''}. Bucket pGC is Super (HS + K12 sold ÷ cc90). HS and K12
-        columns are Looker Audience (Sales). Default sort is Super pGC low to high. Expert CC90 calls, same tag
-        exclusions as look 26569.
+        Today so far{asOf ? ` · ${formatWeek(asOf)}` : ''}. Bucket pGC follows the Audience filter (chip-aware for
+        Cross-trained on Super). HS/K12/Super columns stay full Looker audiences. Default sort is Super pGC low to
+        high. Cross-trained membership is Overflow Configs.
       </p>
     </div>
   )

@@ -9,7 +9,11 @@ function lookerDevPlugin(env: Record<string, string>): Plugin {
     name: 'looker-dev',
     configureServer(server) {
       for (const [key, value] of Object.entries(env)) {
-        if (key.startsWith('LOOKER_') || key === 'ALLOWED_EMAIL_DOMAINS') {
+        if (
+          key.startsWith('LOOKER_') ||
+          key.startsWith('SUPABASE_') ||
+          key === 'ALLOWED_EMAIL_DOMAINS'
+        ) {
           process.env[key] ??= value
         }
       }
