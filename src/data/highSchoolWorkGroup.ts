@@ -4,64 +4,54 @@ import type { RosterEntry } from '../lib/types'
 export const HIGH_SCHOOL_WORK_GROUP = 'High School'
 
 export const HIGH_SCHOOL_ROSTER: Array<{ name: string; manager: string }> = [
-  { name: 'Amanda Schaefer', manager: 'Aaron Bunch' },
-  { name: 'Amy Barnett', manager: 'Jamie Forrest' },
+  { name: 'Amanda Schaefer', manager: 'Liz Weiss' },
   { name: 'Amy Mireles', manager: 'Emily Lopez' },
   { name: 'Angela Mattina', manager: 'Emily Lopez' },
   { name: 'Ayesha Motan', manager: 'Emily Lopez' },
-  { name: 'Becky Ruffer', manager: 'Aaron Bunch' },
-  { name: 'Bianca Thompson', manager: 'Jamie Forrest' },
+  { name: 'Alyssa Schmidt', manager: 'Angela Damon' },
+  { name: 'Becky Ruffer', manager: 'Liz Weiss' },
   { name: 'Brandon Pascucci', manager: 'Emily Lopez' },
   { name: 'Brandy Kezar', manager: 'Angela Damon' },
-  { name: 'Brenda Wong', manager: 'Aaron Bunch' },
-  { name: 'Brittney Abrams', manager: 'Emily Lopez' },
-  { name: 'Caniyah Lowe', manager: 'Jamie Forrest' },
-  { name: 'Carla Hutcherson', manager: 'Angela Damon' },
+  { name: 'Braswell Chappelle', manager: 'Emily Lopez' },
+  { name: 'Brenda Wong', manager: 'Emily Lopez' },
   { name: 'Charlotte Shea', manager: 'Emily Lopez' },
-  { name: 'Chris Jones', manager: 'Aaron Bunch' },
-  { name: 'David Valverde', manager: 'Aaron Bunch' },
-  { name: 'Del Ali', manager: 'Aaron Bunch' },
+  { name: 'Chris Jones', manager: 'Liz Weiss' },
+  { name: 'Del Ali', manager: 'Liz Weiss' },
+  { name: 'Dunte Williams', manager: 'Liz Weiss' },
   { name: 'Eliza Olson', manager: 'Angela Damon' },
   { name: 'Hector Juarez', manager: 'Emily Lopez' },
-  { name: 'Jenna Salupo', manager: 'Aaron Bunch' },
+  { name: 'Jenna Salupo', manager: 'Liz Weiss' },
   { name: 'Jensen Ricke', manager: 'Angela Damon' },
-  { name: 'Jordan Sturdivant', manager: 'Aaron Bunch' },
-  { name: 'Jym Nixon', manager: 'Jamie Forrest' },
+  { name: 'Jordan Sturdivant', manager: 'Liz Weiss' },
   { name: 'Kay Onyekwere', manager: 'Angela Damon' },
-  { name: 'Kimberly Wismar', manager: 'Angela Damon' },
-  { name: 'Kodi Haynes', manager: 'Jamie Forrest' },
+  { name: 'Kodi Haynes', manager: 'Angela Damon' },
   { name: 'Kristine Treijs', manager: 'Angela Damon' },
   { name: 'Lexann Romonosky', manager: 'Emily Lopez' },
-  { name: 'Liz Weiss', manager: 'Aaron Bunch' },
   { name: 'Mark Crane', manager: 'Emily Lopez' },
-  { name: 'Michele Long', manager: 'Aaron Bunch' },
+  { name: 'Martiez Pinnick', manager: 'Emily Lopez' },
+  { name: 'Michele Long', manager: 'Liz Weiss' },
   { name: 'Molly Russell', manager: 'Emily Lopez' },
   { name: 'Natalie Cardenas', manager: 'Emily Lopez' },
-  { name: 'Nicki Sorrentino', manager: 'Aaron Bunch' },
-  { name: 'Raven Tolbert', manager: 'Jamie Forrest' },
+  { name: 'Nicki Sorrentino', manager: 'Liz Weiss' },
   { name: 'Rebecca Kennard', manager: 'Emily Lopez' },
+  { name: 'Rebekah Ash', manager: 'Angela Damon' },
   { name: 'Ryan Cuellar', manager: 'Angela Damon' },
   { name: 'Sandra McIntyre', manager: 'Angela Damon' },
   { name: 'Shana McNeil', manager: 'Emily Lopez' },
-  { name: 'Sharon Razzore', manager: 'Jamie Forrest' },
-  { name: 'Stephanie Kegley', manager: 'Jamie Forrest' },
-  { name: 'Timothy Carr', manager: 'Aaron Bunch' },
-  { name: 'Timothy Girdlestone', manager: 'Jamie Forrest' },
-  { name: 'Tyrae Jones', manager: 'Jamie Forrest' },
-  { name: 'Victoria Milani', manager: 'Jamie Forrest' },
+  { name: 'Tanner Smith', manager: 'Emily Lopez' },
+  { name: 'Tierra Tate', manager: 'Angela Damon' },
+  { name: 'Timothy Carr', manager: 'Liz Weiss' },
   { name: 'Virginia Bailey-Barnes', manager: 'Angela Damon' },
-  { name: 'Walter Adams', manager: 'Jamie Forrest' },
 ]
 
 export const HIGH_SCHOOL_NAMES = HIGH_SCHOOL_ROSTER.map((r) => r.name)
 
 /** Looker Consultant spellings that differ from HR `mgr_name`. */
-export const LOOKER_REP_NAME_ALIASES = ['Delair Ali', 'Domenica Sorrentino', 'Elizabeth Weiss'] as const
+export const LOOKER_REP_NAME_ALIASES = ['Delair Ali', 'Domenica Sorrentino'] as const
 
 const LOOKER_ALIASES: Record<string, string> = {
   'delair ali': 'Del Ali',
   'domenica sorrentino': 'Nicki Sorrentino',
-  'elizabeth weiss': 'Liz Weiss',
 }
 
 const NAME_SET = new Set(HIGH_SCHOOL_NAMES.map((n) => n.toLowerCase()))
