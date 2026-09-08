@@ -187,6 +187,12 @@ export default function App() {
   }, [livePayload, intraday])
 
   useEffect(() => {
+    if (manager && livePayload && livePayload.roster.length > 0 && !livePayload.roster.some((r) => r.manager === manager)) {
+      setManager(null)
+    }
+  }, [manager, livePayload])
+
+  useEffect(() => {
     const onPlaybook = tab === 'playbook'
     const hashTab = onPlaybook && weekCursor === 0 ? 'wtd' : tab
     writeHash({
@@ -345,7 +351,7 @@ export default function App() {
   )
 
   const allRows = useMemo(() => {
-    if (!livePayload || livePayload.empty) return []
+    if (!livePayload || (livePayload.empty && livePayload.roster.length === 0)) return []
     const withHistory = {
       ...livePayload,
       focusLog: mergeFocusLog(livePayload.focusLog, historyFromStore(focus)),
@@ -359,7 +365,7 @@ export default function App() {
   }, [livePayload, cohort, focus, targetPgc, closedWeekIndex, staffing, manager, settings.lcCurves])
 
   const dailyRows = useMemo(() => {
-    if (!livePayload || livePayload.empty) return []
+    if (!livePayload || (livePayload.empty && livePayload.roster.length === 0)) return []
     const built = buildDailyRows(livePayload, cohort, targetPgc, {
       staffing,
       lcCurves: settings.lcCurves,
@@ -376,7 +382,7 @@ export default function App() {
   )
 
   const priorRows = useMemo(() => {
-    if (!livePayload || livePayload.empty || closedWeekIndex + 1 >= livePayload.weeks.length) return []
+    if (!livePayload || (livePayload.empty && livePayload.roster.length === 0) || closedWeekIndex + 1 >= livePayload.weeks.length) return []
     const withHistory = {
       ...livePayload,
       focusLog: mergeFocusLog(livePayload.focusLog, historyFromStore(focus)),
@@ -408,7 +414,7 @@ export default function App() {
   }, [suggestions])
 
   const catalogRows = useMemo(() => {
-    if (!livePayload || livePayload.empty) return []
+    if (!livePayload || (livePayload.empty && livePayload.roster.length === 0)) return []
     const withHistory = {
       ...livePayload,
       focusLog: mergeFocusLog(livePayload.focusLog, historyFromStore(focus)),
@@ -680,6 +686,9 @@ export default function App() {
       />
 
       <main className="mt-4 space-y-4">
+        {tab !== 'routing' && tab !== 'intraday' && livePayload?.emptyReason && livePayload.roster.length > 0 ? (
+          <p className="mx-auto max-w-6xl px-4 text-sm text-amber-700 sm:px-6">{livePayload.emptyReason}</p>
+        ) : null}
         {tab === 'routing' ? (
           <>
             {routingLoading ? (
@@ -751,7 +760,7 @@ export default function App() {
         ) : !livePayload || livePayload.slice !== slice ? (
           <div className="mx-auto max-w-6xl px-4 text-sm text-slate-500 sm:px-6">Loading week…</div>
         ) : tab === 'focus' ? (
-          livePayload.empty ? (
+          livePayload.empty && livePayload.roster.length === 0 ? (
             <div className="mx-auto max-w-6xl px-4 sm:px-6">
               <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
                 <p className="text-lg font-semibold text-slate-800">Focus list</p>
@@ -778,7 +787,7 @@ export default function App() {
             onHide={onHideRep}
             onShow={onShowRep}
           />
-        ) : livePayload.empty ? (
+        ) : livePayload.empty && livePayload.roster.length === 0 ? (
           <div className="mx-auto max-w-6xl px-4 sm:px-6">
             <div className="rounded-2xl surface border-dashed px-6 py-12 text-center">
               <p className="text-lg font-semibold text-slate-800">

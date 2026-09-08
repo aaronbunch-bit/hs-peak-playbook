@@ -68,7 +68,7 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
     }
     if (res.ok) {
       const data = (await res.json()) as PacerPayload
-      if (data.weekly?.length || data.daily?.length || data.empty) return data
+      if (data.weekly?.length || data.daily?.length || data.roster?.length || data.empty) return data
     }
   } catch {
     // Local Vite uses the seed if the Looker proxy is not running.
@@ -89,9 +89,6 @@ export async function fetchPacerData(slice: Slice, staffing: Staffing = 'primary
   const facts = seed.facts.filter((f) => isHighSchoolName(f.name))
   const weekly = facts.map((f) => factToWeekly(f, slice)).filter((row) => row != null)
   const weeks = [...new Set(facts.map((f) => f.week))].sort((a, b) => (a < b ? 1 : -1))
-  if (weekly.length === 0) {
-    return emptyPayload(slice, `No rows for ${SLICE_LOOKER_FILTERS[slice].label} in the Looker extract.`)
-  }
   return {
     source: seed.source,
     slice,

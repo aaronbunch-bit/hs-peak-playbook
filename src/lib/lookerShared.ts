@@ -1,3 +1,4 @@
+import { overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import type { PacerPayload, Slice } from './types'
 
@@ -44,7 +45,7 @@ export function emptyPayload(slice: Slice, reason: string): PacerPayload {
     improvePts: DEFAULT_IMPROVE_PTS,
     degradePts: DEFAULT_DEGRADE_PTS,
     weeks: [],
-    roster: [],
+    roster: overlayHighSchoolRoster([]),
     weekly: [],
     wtd: [],
     daily: [],

@@ -169,29 +169,35 @@ function dailyFields(query: LookerQuery): string[] {
   return (query.fields ?? []).map((field) => (field === WEEK_FIELD ? DATE_FIELD : field))
 }
 
-async function runClosedWeeks(token: string, query: LookerQuery): Promise<{ csv: string; savedLook: boolean }> {
+async function runClosedWeeks(
+  token: string,
+  query: LookerQuery,
+  extra?: QueryExtra,
+): Promise<{ csv: string; savedLook: boolean }> {
   try {
-    return { csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER), savedLook: false }
+    return { csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, extra), savedLook: false }
   } catch {
     return { csv: await runSavedLook(token), savedLook: true }
   }
 }
 
-async function runWtd(token: string, query: LookerQuery): Promise<string> {
+async function runWtd(token: string, query: LookerQuery, extra?: QueryExtra): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
   return runQueryCsv(token, query, `${sunday} to ${today}`, {
     filters: DASHBOARD_7699_FILTERS,
+    peakNames: extra?.peakNames,
   })
 }
 
-async function runDod(token: string, query: LookerQuery): Promise<string> {
+async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
   return runQueryCsv(token, query, `${sunday} to ${today}`, {
     fields: dailyFields(query),
     filters: DASHBOARD_7699_FILTERS,
     sorts: [`${DATE_FIELD} desc`, 'call_data_with_coselling.mgr_name'],
+    peakNames: extra?.peakNames,
   })
 }
 
@@ -405,20 +411,26 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
     runWtd(token, query).catch(() => ''),
     runDod(token, query).catch(() => ''),
   ])
-  const facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
-  const wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
-  const dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
-  const payload = payloadFromFacts(
+  let facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
+  let wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
+  let dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
+  if (facts.length === 0 && dailyFacts.length === 0) {
+    const [closedAll, wtdAll, dodAll] = await Promise.all([
+      runClosedWeeks(token, query, { peakNames: false }).catch(() => ({ csv: '', savedLook: false })),
+      runWtd(token, query, { peakNames: false }).catch(() => ''),
+      runDod(token, query, { peakNames: false }).catch(() => ''),
+    ])
+    facts = restrictToHighSchool(parseLookerPlaybook(closedAll.csv))
+    wtdFacts = restrictToHighSchool(wtdAll ? parseLookerPlaybook(wtdAll) : wtdFacts)
+    dailyFacts = restrictToHighSchool(dodAll ? parseLookerPlaybook(dodAll) : dailyFacts)
+  }
+  return payloadFromFacts(
     slice,
     facts,
     wtdFacts,
     `Looker look ${lookId()} · High School Peak by Rep Name`,
     dailyFacts,
   )
-  if (payload.weekly.length === 0 && payload.daily.length === 0) {
-    return emptyPayload(slice, `No rows for ${SLICE_LOOKER_FILTERS[slice].label} from Looker look ${lookId()}.`)
-  }
-  return payload
 }
 
 function allowedDomains(): string[] {
