@@ -1,6 +1,6 @@
 # HS Peak Playbook
 
-pGC week-over-week tracker for High School Peak. Live data comes from Looker look **26564** (HS Peak Playbook). Local `npm run dev` can fall back to a committed seed extract if Looker is not configured.
+pGC week-over-week tracker for High School Peak. Live data comes from Looker dashboard **sales::call_duration_per_rep_by_supergroup** (historical weeks, WTD/DoD, Routing, and Intraday). Local `npm run dev` can fall back to a committed seed extract if Looker is not configured.
 
 ```bash
 npm install
@@ -19,11 +19,11 @@ One row per **Consultant** per **Sunday week**, pivoted by **Audience**:
 | K12 Test Prep CC90 / pGC / CC90 Mix | K12TP |
 | **Total pGC** | **Supergroup** (volume-weighted HS + K12) |
 
-The clone filters Looker **Rep Name** to the High School Peak list and does **not** filter Rep Manager, Work Group, or Super Group — those employee fields lag HR. K12 Test Prep is an Audience, not a work group. People on that list still appear if they have no HS/K12 volume yet.
+The clone starts from that dashboard’s per-rep query, filters Looker **Rep Name** to the High School Peak list, and does **not** filter Rep Manager, Work Group, or Super Group — those employee fields lag HR. K12 Test Prep is an Audience, not a work group. People on that list still appear if they have no HS/K12 volume yet.
 
 There is no Overall. Total pGC is Supergroup.
 
-The **WTD** week on the Playbook pager is day grain: Call Created At Date = this Sunday → today, same audience pivot, plus dashboard 7699 defaults (Business = International, VT Core; Expert Type ≠ Dropped Expert; Consultant cc90 = Yes). DoD is that day’s pGC minus the prior calendar day. Team blocks on WTD are WTD pGC, latest-day pGC, at target, improving DoD, and focus.
+The **WTD** week on the Playbook pager is day grain: Call Created At Date = this Sunday → today, same audience pivot, plus dashboard 7699 defaults when the explore has those fields (Business = International, VT Core; Expert Type ≠ Dropped Expert; Consultant cc90 = Yes). DoD is that day’s pGC minus the prior calendar day. Team blocks on WTD are WTD pGC, latest-day pGC, at target, improving DoD, and focus.
 
 Team KPIs use CC90-weighted pGC so they match Looker rollups.
 
@@ -33,7 +33,7 @@ Ingest a new extract (can include several weeks):
 python3 scripts/ingest-looker-playbook.py "/path/to/HS Peak Playbook.csv"
 ```
 
-WTD uses the same look with Call Created At = this Sunday through today.
+WTD and Intraday clone the same dashboard query (Intraday uses Call Created At = today). Looks **26564** / **26569** remain fallbacks if the dashboard cannot be read.
 
 ## Secrets (never commit)
 
@@ -44,7 +44,9 @@ Copy `.env.example` to `.env` locally. Put the same keys in **Netlify → Site c
 | `LOOKER_BASE_URL` | Netlify + local `.env` | `https://varsitytutors.looker.com` |
 | `LOOKER_CLIENT_ID` | Netlify + local `.env` | Looker API3 client |
 | `LOOKER_CLIENT_SECRET` | Netlify + local `.env` | Looker API3 secret |
-| `LOOKER_LOOK_ID` | Netlify + local `.env` | `26564` |
+| `LOOKER_DASHBOARD_ID` | Netlify + local `.env` | `sales::call_duration_per_rep_by_supergroup` |
+| `LOOKER_LOOK_ID` | Netlify + local `.env` | `26564` (fallback if the dashboard has no query) |
+| `LOOKER_INTRADAY_LOOK_ID` | Netlify + local `.env` | `26569` (fallback if today’s dashboard rows don’t parse) |
 | `ALLOWED_EMAIL_DOMAINS` | Netlify + local `.env` | Function allowlist, default `varsitytutors.com` |
 | `VITE_ALLOWED_EMAIL_DOMAINS` | Netlify (build) + local `.env` | Login-wall allowlist; must be present at **build** time |
 

@@ -272,17 +272,18 @@ export function SettingsPanel({
             <ol className="mt-2 list-decimal space-y-2 pl-4">
               <li>API key lives on Netlify (`LOOKER_CLIENT_ID` / secret), never in the browser.</li>
               <li>
-                Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so the rep drawer has
-                history for the sparkline. Grain is Call Created At Week × Consultant, pivoted by Audience
-                (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). The clone filters Looker
-                by Rep Name from the High School Peak list. Looker Rep Manager, Work Group, and Super Group are
-                left open because those employee fields lag HR. People on that list still appear if they have no
-                volume yet.
+                Closed weeks clone Looker dashboard `sales::call_duration_per_rep_by_supergroup` for the last 12
+                Sunday weeks so the rep drawer has history for the sparkline. Grain is Call Created At Week ×
+                Consultant, pivoted by Audience (HS-STEM and K12 Test Prep). Total pGC is Supergroup
+                (volume-weighted). The clone filters Looker by Rep Name from the High School Peak list. Looker Rep
+                Manager, Work Group, and Super Group are left open because those employee fields lag HR. People on
+                that list still appear if they have no volume yet.
               </li>
               <li>
-                WTD DoD clones the same look at Call Created At Date (this Sunday → today) with dashboard 7699
-                filters (Business, Expert Type, Consultant cc90) and the same Rep Name list. Each cell is that
-                day’s pGC; DoD is vs the prior calendar day.
+                WTD DoD clones the same dashboard at Call Created At Date (this Sunday → today) with dashboard 7699
+                filters (Business, Expert Type, Consultant cc90) when those fields exist, and the same Rep Name
+                list. Each cell is that day’s pGC; DoD is vs the prior calendar day. Intraday uses that query with
+                Call Created At = today.
               </li>
               <li>
                 WTD is the newest stop on the Playbook week pager (› from the latest closed week). The daily

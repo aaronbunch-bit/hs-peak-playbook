@@ -1,7 +1,21 @@
 import { addDays, daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName, lookerRepNameFilter, overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
-import { emptyIntraday, parseIntradayCsv } from './intraday'
+import { emptyIntraday, parseIntradayCsv, parseIntradayFromCsv } from './intraday'
+import {
+  applyDashboardDefaultFilters,
+  dailyFieldsFor,
+  dailyFillFields,
+  dash7699Filters,
+  DEFAULT_LOOKER_DASHBOARD_ID,
+  exploreFromQuery,
+  pickDashboardQuery,
+  queryIdFromElement,
+  toLookerQuery,
+  type LookerDashboard,
+  type LookerExplore,
+  type LookerQuery,
+} from './lookerDashboard'
 import { factToWeekly, parseLookerPlaybook } from './lookerExport'
 import { emptyPayload, SLICE_LOOKER_FILTERS } from './lookerShared'
 import { resolveOverflowAllowlist, serializeAllowlist, snapshotAllowlistAsOf, snapshotOverflowAllowlist } from './overflowAllowlist'
@@ -10,31 +24,6 @@ import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
 import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
-const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
-const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
-const DATE_FIELD = 'call_data_with_coselling.call_created_at_date'
-const REP_NAME_FIELD = 'call_data_with_coselling.mgr_name'
-
-/** Dashboard 7699 defaults that the DoD clone should match. */
-const DASHBOARD_7699_FILTERS: Record<string, string> = {
-  'call_data_with_coselling.business': 'International,VT Core',
-  'call_data_with_coselling.expert_type': '-Dropped Expert',
-  'call_data_with_coselling.consultant_cc90': 'Yes',
-}
-
-type LookerQuery = {
-  model?: string
-  view?: string
-  fields?: string[]
-  pivots?: string[]
-  filters?: Record<string, string>
-  sorts?: string[]
-  limit?: string | number
-  dynamic_fields?: string
-  query_timezone?: string
-  fill_fields?: string[]
-  vis_config?: unknown
-}
 
 function env(name: string): string {
   const g = globalThis as { process?: { env?: Record<string, string | undefined> } }
@@ -48,6 +37,10 @@ function apiBase(): string {
 
 function lookId(): string {
   return env('LOOKER_LOOK_ID') || '26564'
+}
+
+function dashboardId(): string {
+  return env('LOOKER_DASHBOARD_ID') || DEFAULT_LOOKER_DASHBOARD_ID
 }
 
 export function lookerConfigured(): boolean {
@@ -102,27 +95,99 @@ async function lookQuery(token: string): Promise<LookerQuery> {
   return lookQueryFor(token, lookId())
 }
 
+async function fetchDashboardJson(token: string, id: string): Promise<LookerDashboard | null> {
+  for (const path of [`/dashboards/${id}`, `/dashboards/${encodeURIComponent(id)}`]) {
+    const res = await lookerFetch(token, path)
+    if (res.ok) return (await res.json()) as LookerDashboard
+  }
+  const search = await lookerFetch(token, `/dashboards/search?id=${encodeURIComponent(id)}`)
+  if (search.ok) {
+    const list = (await search.json()) as LookerDashboard[]
+    if (list[0]) return list[0]
+  }
+  const name = id.includes('::') ? id.split('::')[1] : id
+  const byTitle = await lookerFetch(token, `/dashboards/search?title=${encodeURIComponent(name)}`)
+  if (!byTitle.ok) return null
+  const titled = (await byTitle.json()) as LookerDashboard[]
+  return titled.find((d) => d.id === id || d.id?.endsWith(`::${name}`)) ?? titled[0] ?? null
+}
+
+async function hydrateDashboardElements(token: string, dashboard: LookerDashboard, id: string): Promise<LookerDashboard> {
+  if (dashboard.dashboard_elements?.some((el) => toLookerQuery(el.query) || toLookerQuery(el.result_maker?.query))) {
+    return dashboard
+  }
+  const search = await lookerFetch(token, `/dashboard_elements/search?dashboard_id=${encodeURIComponent(id)}`)
+  if (!search.ok) return dashboard
+  const elements = (await search.json()) as LookerDashboard['dashboard_elements']
+  return { ...dashboard, dashboard_elements: elements ?? dashboard.dashboard_elements }
+}
+
+async function resolveElementQuery(token: string, dashboard: LookerDashboard): Promise<LookerQuery | null> {
+  const picked = pickDashboardQuery(dashboard)
+  if (picked?.fields?.length) return picked
+  for (const element of dashboard.dashboard_elements ?? []) {
+    const queryId = queryIdFromElement(element)
+    if (!queryId) continue
+    const res = await lookerFetch(token, `/queries/${queryId}`)
+    if (!res.ok) continue
+    const query = toLookerQuery((await res.json()) as LookerQuery)
+    if (query?.fields?.length) return query
+  }
+  return picked
+}
+
+async function loadExplore(token: string): Promise<LookerExplore> {
+  const id = dashboardId()
+  const dash = await fetchDashboardJson(token, id).catch(() => null)
+  if (dash) {
+    const hydrated = await hydrateDashboardElements(token, dash, dash.id ?? id).catch(() => dash)
+    const query = await resolveElementQuery(token, hydrated)
+    if (query?.model && query.view && query.fields?.length) {
+      return exploreFromQuery(applyDashboardDefaultFilters(query, hydrated.dashboard_filters), `Looker dashboard ${id}`)
+    }
+  }
+  const fallback = await lookQuery(token)
+  return exploreFromQuery(fallback, `Looker look ${lookId()} · High School Peak by Rep Name`)
+}
+
 type QueryExtra = {
   fields?: string[]
   filters?: Record<string, string>
   sorts?: string[]
   peakNames?: boolean
   limit?: string
+  fillFields?: string[]
 }
 
 async function runQueryCsv(
   token: string,
-  query: LookerQuery,
+  explore: LookerExplore,
   timeFilter: string,
   extra?: QueryExtra,
 ): Promise<string> {
   const res = await lookerFetch(token, '/queries/run/csv', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(queryBody(query, timeFilter, extra)),
+    body: JSON.stringify(queryBody(explore, timeFilter, extra)),
   })
   if (!res.ok) throw new Error(`Looker query failed (${res.status})`)
   return res.text()
+}
+
+async function runQueryCsvWithOptional7699(
+  token: string,
+  explore: LookerExplore,
+  timeFilter: string,
+  extra?: QueryExtra,
+): Promise<string> {
+  try {
+    return await runQueryCsv(token, explore, timeFilter, {
+      ...extra,
+      filters: { ...dash7699Filters(explore), ...(extra?.filters ?? {}) },
+    })
+  } catch {
+    return runQueryCsv(token, explore, timeFilter, extra)
+  }
 }
 
 /** Roster is the Rep Name list. Looker manager / work-group fields lag HR. */
@@ -137,19 +202,20 @@ function membershipAgnosticFilters(filters: Record<string, string>): Record<stri
 }
 
 function queryBody(
-  query: LookerQuery,
+  explore: LookerExplore,
   timeFilter: string,
   extra?: QueryExtra,
 ): Record<string, unknown> {
+  const query = explore.query
   const filters: Record<string, string> = {
     ...membershipAgnosticFilters(query.filters ?? {}),
-    [LOOKER_TIME_FILTER]: timeFilter,
+    [explore.timeFilter]: timeFilter,
     ...membershipAgnosticFilters(extra?.filters ?? {}),
   }
   if (extra?.peakNames === false) {
-    delete filters[REP_NAME_FIELD]
+    delete filters[explore.repNameField]
   } else {
-    filters[REP_NAME_FIELD] = lookerRepNameFilter()
+    filters[explore.repNameField] = lookerRepNameFilter()
   }
   return {
     model: query.model,
@@ -161,51 +227,44 @@ function queryBody(
     limit: extra?.limit ?? (extra?.peakNames === false ? '10000' : (query.limit ?? '5000')),
     dynamic_fields: query.dynamic_fields,
     query_timezone: query.query_timezone,
-    fill_fields: query.fill_fields,
+    fill_fields: extra?.fillFields ?? (extra?.fields ? dailyFillFields(explore) : query.fill_fields),
   }
-}
-
-function dailyFields(query: LookerQuery): string[] {
-  return (query.fields ?? []).map((field) => (field === WEEK_FIELD ? DATE_FIELD : field))
 }
 
 async function runClosedWeeks(
   token: string,
-  query: LookerQuery,
+  explore: LookerExplore,
   extra?: QueryExtra,
 ): Promise<{ csv: string; savedLook: boolean }> {
   try {
-    return { csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, extra), savedLook: false }
+    return { csv: await runQueryCsv(token, explore, CLOSED_WEEKS_FILTER, extra), savedLook: false }
   } catch {
     return { csv: await runSavedLook(token), savedLook: true }
   }
 }
 
-async function runWtd(token: string, query: LookerQuery, extra?: QueryExtra): Promise<string> {
+async function runWtd(token: string, explore: LookerExplore, extra?: QueryExtra): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
-  return runQueryCsv(token, query, `${sunday} to ${today}`, {
-    filters: DASHBOARD_7699_FILTERS,
+  return runQueryCsvWithOptional7699(token, explore, `${sunday} to ${today}`, {
     peakNames: extra?.peakNames,
   })
 }
 
-async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Promise<string> {
+async function runDod(token: string, explore: LookerExplore, extra?: QueryExtra): Promise<string> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
-  return runQueryCsv(token, query, `${sunday} to ${today}`, {
-    fields: dailyFields(query),
-    filters: DASHBOARD_7699_FILTERS,
-    sorts: [`${DATE_FIELD} desc`, 'call_data_with_coselling.mgr_name'],
+  return runQueryCsvWithOptional7699(token, explore, `${sunday} to ${today}`, {
+    fields: dailyFieldsFor(explore),
+    sorts: [`${explore.dateField} desc`, explore.repNameField],
     peakNames: extra?.peakNames,
   })
 }
 
-async function runRoutingRange(token: string, query: LookerQuery, start: string, end: string): Promise<string> {
-  return runQueryCsv(token, query, `${start} to ${addDays(end, 1)}`, {
-    fields: dailyFields(query),
-    filters: DASHBOARD_7699_FILTERS,
-    sorts: [`${DATE_FIELD} desc`, REP_NAME_FIELD],
+async function runRoutingRange(token: string, explore: LookerExplore, start: string, end: string): Promise<string> {
+  return runQueryCsvWithOptional7699(token, explore, `${start} to ${addDays(end, 1)}`, {
+    fields: dailyFieldsFor(explore),
+    sorts: [`${explore.dateField} desc`, explore.repNameField],
     peakNames: false,
     limit: '50000',
   })
@@ -307,7 +366,7 @@ async function resolvedOverflow(): Promise<{
   }))
 }
 
-async function runIntradayCsv(token: string, query: LookerQuery): Promise<string> {
+async function runLegacyIntradayCsv(token: string, query: LookerQuery): Promise<string> {
   const filters: Record<string, string> = { ...(query.filters ?? {}) }
   delete filters['employee_directory.rd_name']
   delete filters['employee_directory.mgr_name']
@@ -337,6 +396,15 @@ async function runIntradayCsv(token: string, query: LookerQuery): Promise<string
   return res.text()
 }
 
+async function runDashboardIntradayCsv(token: string, explore: LookerExplore): Promise<string> {
+  return runQueryCsvWithOptional7699(token, explore, 'today', {
+    fields: dailyFieldsFor(explore),
+    sorts: [explore.repNameField],
+    peakNames: false,
+    limit: '10000',
+  })
+}
+
 export async function fetchLookerIntraday(): Promise<IntradayPayload> {
   const resolved = await resolvedOverflow()
   const allowlistMeta = {
@@ -351,14 +419,23 @@ export async function fetchLookerIntraday(): Promise<IntradayPayload> {
     }
   }
   const token = await login()
-  const query = await lookQueryFor(token, intradayLookId())
-  const csv = await runIntradayCsv(token, query)
-  const rows = parseIntradayCsv(csv, resolved.allowlist)
+  const explore = await loadExplore(token)
+  let source = `${explore.sourceLabel} · today`
+  let rows = parseIntradayFromCsv(await runDashboardIntradayCsv(token, explore), resolved.allowlist)
+  if (rows.length === 0) {
+    try {
+      const query = await lookQueryFor(token, intradayLookId())
+      rows = parseIntradayCsv(await runLegacyIntradayCsv(token, query), resolved.allowlist)
+      if (rows.length > 0) source = `Looker look ${intradayLookId()}`
+    } catch {
+      // Keep the dashboard empty result; the saved look is only a fallback.
+    }
+  }
   if (rows.length === 0) {
     return { ...emptyIntraday('No people with HS/K12 CC90 yet today.'), ...allowlistMeta }
   }
   return {
-    source: `Looker look ${intradayLookId()}`,
+    source,
     asOf: toIsoDate(new Date()),
     rows,
     ...allowlistMeta,
@@ -383,8 +460,8 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     }
   }
   const token = await login()
-  const query = await lookQuery(token)
-  const csv = await runRoutingRange(token, query, range.start, range.end)
+  const explore = await loadExplore(token)
+  const csv = await runRoutingRange(token, explore, range.start, range.end)
   return {
     start: range.start,
     end: range.end,
@@ -405,20 +482,20 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
   }
 
   const token = await login()
-  const query = await lookQuery(token)
+  const explore = await loadExplore(token)
   const [closed, wtdCsv, dodCsv] = await Promise.all([
-    runClosedWeeks(token, query),
-    runWtd(token, query).catch(() => ''),
-    runDod(token, query).catch(() => ''),
+    runClosedWeeks(token, explore),
+    runWtd(token, explore).catch(() => ''),
+    runDod(token, explore).catch(() => ''),
   ])
   let facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
   let wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
   let dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
   if (facts.length === 0 && dailyFacts.length === 0) {
     const [closedAll, wtdAll, dodAll] = await Promise.all([
-      runClosedWeeks(token, query, { peakNames: false }).catch(() => ({ csv: '', savedLook: false })),
-      runWtd(token, query, { peakNames: false }).catch(() => ''),
-      runDod(token, query, { peakNames: false }).catch(() => ''),
+      runClosedWeeks(token, explore, { peakNames: false }).catch(() => ({ csv: '', savedLook: false })),
+      runWtd(token, explore, { peakNames: false }).catch(() => ''),
+      runDod(token, explore, { peakNames: false }).catch(() => ''),
     ])
     facts = restrictToHighSchool(parseLookerPlaybook(closedAll.csv))
     wtdFacts = restrictToHighSchool(wtdAll ? parseLookerPlaybook(wtdAll) : wtdFacts)
@@ -428,7 +505,7 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
     slice,
     facts,
     wtdFacts,
-    `Looker look ${lookId()} · High School Peak by Rep Name`,
+    `${explore.sourceLabel} · High School Peak by Rep Name`,
     dailyFacts,
   )
 }
