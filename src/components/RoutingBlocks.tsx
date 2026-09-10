@@ -14,9 +14,12 @@ type Props = {
 function BlockCopy({
   label,
   row,
+  cc90Share,
 }: {
   label: string
   row: RoutingGroupStats
+  /** Share of Overall cc90; null on Overall itself. */
+  cc90Share: number | null
 }) {
   return (
     <>
@@ -25,6 +28,7 @@ function BlockCopy({
       <p className="mt-0.5 text-xs tabular-nums text-slate-400">
         {row.n}
         {row.cc90 > 0 ? ` · ${row.cc90.toLocaleString()} cc90` : ' · —'}
+        {row.cc90 > 0 && cc90Share != null ? ` (${formatPgc(cc90Share)})` : ''}
       </p>
     </>
   )
@@ -61,7 +65,11 @@ export function RoutingBlocks({ stats, overall, selected, loading = false, onSel
             onClick={() => onSelect(on ? null : card.id)}
             className="routing-block"
           >
-            <BlockCopy label={card.label} row={card.row} />
+            <BlockCopy
+              label={card.label}
+              row={card.row}
+              cc90Share={card.id === 'overall' || overall.cc90 <= 0 ? null : card.row.cc90 / overall.cc90}
+            />
           </button>
         )
       })}
