@@ -1,7 +1,7 @@
 import type { LookerFact, Slice, WeeklyRow } from './types'
 
 /**
- * Connected Looker dashboard: sales::call_duration_per_rep_by_supergroup.
+ * Connected Looker look: HS Peak Playbook.
  *
  * Grain: Call Created At Week (Sunday) × Consultant.
  * Pivot: Audience = HS-STEM | K12 Test Prep.

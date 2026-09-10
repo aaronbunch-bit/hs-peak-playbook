@@ -106,7 +106,7 @@ export type RoutingRangePayload = {
   emptyReason?: string
 }
 
-/** Dashboard `sales::call_duration_per_rep_by_supergroup` (and legacy look 26569): today so far. */
+/** Look 26569: Manager = rep, Regional Director = manager. Today so far. */
 export type IntradayRow = {
   name: string
   manager: string | null

@@ -1,7 +1,7 @@
 import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
 import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
 import { toIsoDate } from './calendar'
-import { canonicalManager, impliedImpact, parseCsv, parseLookerPlaybook } from './lookerExport'
+import { canonicalManager, impliedImpact, parseCsv } from './lookerExport'
 import { chipsForName, type OverflowAllowlist } from './overflowAllowlist'
 import { expectedPgc, type LcCurves, type Targets, targetForSlice } from './settings'
 import type { IntradayPayload, IntradayRepRow, IntradayRow, LookerFact, Slice } from './types'
@@ -46,6 +46,54 @@ type Acc = {
 function pgc(sold: number, cc90: number): number | null {
   if (cc90 <= 0) return null
   return sold / cc90
+}
+
+function accToRow(row: Acc, allowlist: OverflowAllowlist): IntradayRow | null {
+  const chips = chipsForName(allowlist, row.name)
+  const provisional = assignRoutingGroup(row.name, row.manager, chips, 'supergroup')
+  if (provisional === 'overflow' && isOverflowExcludedManager(row.manager)) return null
+  const superCc90 = row.hsCc90 + row.k12Cc90
+  if (superCc90 <= 0) return null
+  return {
+    name: row.name,
+    manager: row.manager,
+    dedicatedHs: chips.dedicatedHs,
+    dedicatedK12: chips.dedicatedK12,
+    hsPgc: pgc(row.hsSold, row.hsCc90),
+    hsCc90: row.hsCc90,
+    k12Pgc: pgc(row.k12Sold, row.k12Cc90),
+    k12Cc90: row.k12Cc90,
+    superPgc: pgc(row.hsSold + row.k12Sold, superCc90),
+    superCc90,
+    hsSold: row.hsSold,
+    k12Sold: row.k12Sold,
+  }
+}
+
+/** Today's rows off the playbook-shaped clone: Consultant × HS-STEM / K12 Test Prep. */
+export function factsToIntraday(facts: LookerFact[], allowlist: OverflowAllowlist): IntradayRow[] {
+  const byName = new Map<string, Acc>()
+  for (const fact of facts) {
+    const name = canonicalHighSchoolName(fact.name) ?? fact.name.trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    const prev = byName.get(key) ?? {
+      name,
+      manager: canonicalManager(fact.manager),
+      hsSold: 0,
+      hsCc90: 0,
+      k12Sold: 0,
+      k12Cc90: 0,
+    }
+    prev.hsSold += impliedImpact(fact.hsPgc, fact.hsCc90, fact.hsImpact)
+    prev.hsCc90 += fact.hsCc90
+    prev.k12Sold += impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
+    prev.k12Cc90 += fact.k12Cc90
+    byName.set(key, prev)
+  }
+  return [...byName.values()]
+    .map((row) => accToRow(row, allowlist))
+    .filter((row): row is IntradayRow => row != null)
 }
 
 export function parseIntradayCsv(csv: string, allowlist: OverflowAllowlist): IntradayRow[] {
@@ -96,73 +144,29 @@ export function parseIntradayCsv(csv: string, allowlist: OverflowAllowlist): Int
   }
 
   return [...byName.values()]
-    .map((row) => accToIntraday(row, allowlist))
+    .map((row) => {
+      const chips = chipsForName(allowlist, row.name)
+      const provisional = assignRoutingGroup(row.name, row.manager, chips, 'supergroup')
+      if (provisional === 'overflow' && isOverflowExcludedManager(row.manager)) return null
+      const superCc90 = row.hsCc90 + row.k12Cc90
+      const superSold = row.hsSold + row.k12Sold
+      if (superCc90 <= 0) return null
+      return {
+        name: row.name,
+        manager: row.manager,
+        dedicatedHs: chips.dedicatedHs,
+        dedicatedK12: chips.dedicatedK12,
+        hsPgc: pgc(row.hsSold, row.hsCc90),
+        hsCc90: row.hsCc90,
+        k12Pgc: pgc(row.k12Sold, row.k12Cc90),
+        k12Cc90: row.k12Cc90,
+        superPgc: pgc(superSold, superCc90),
+        superCc90,
+        hsSold: row.hsSold,
+        k12Sold: row.k12Sold,
+      }
+    })
     .filter((row): row is IntradayRow => row != null)
-}
-
-function accToIntraday(row: Acc, allowlist: OverflowAllowlist): IntradayRow | null {
-  const chips = chipsForName(allowlist, row.name)
-  const provisional = assignRoutingGroup(row.name, row.manager, chips, 'supergroup')
-  if (provisional === 'overflow' && isOverflowExcludedManager(row.manager)) return null
-  const superCc90 = row.hsCc90 + row.k12Cc90
-  const superSold = row.hsSold + row.k12Sold
-  if (superCc90 <= 0) return null
-  return {
-    name: row.name,
-    manager: row.manager,
-    dedicatedHs: chips.dedicatedHs,
-    dedicatedK12: chips.dedicatedK12,
-    hsPgc: pgc(row.hsSold, row.hsCc90),
-    hsCc90: row.hsCc90,
-    k12Pgc: pgc(row.k12Sold, row.k12Cc90),
-    k12Cc90: row.k12Cc90,
-    superPgc: pgc(superSold, superCc90),
-    superCc90,
-    hsSold: row.hsSold,
-    k12Sold: row.k12Sold,
-  }
-}
-
-/** Same grain as playbook / Routing: Consultant × HS-STEM + K12 Test Prep. */
-export function factsToIntraday(facts: LookerFact[], allowlist: OverflowAllowlist): IntradayRow[] {
-  const byName = new Map<string, Acc>()
-  for (const fact of facts) {
-    const rawName = fact.name.trim()
-    const name = canonicalHighSchoolName(rawName) ?? rawName
-    if (!name) continue
-    const hsSold = impliedImpact(fact.hsPgc, fact.hsCc90, fact.hsImpact)
-    const k12Sold = impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
-    const key = name.toLowerCase()
-    const prev = byName.get(key)
-    const manager = canonicalManager(fact.manager)
-    if (!prev) {
-      byName.set(key, {
-        name,
-        manager,
-        hsSold,
-        hsCc90: fact.hsCc90,
-        k12Sold,
-        k12Cc90: fact.k12Cc90,
-      })
-      continue
-    }
-    prev.hsSold += hsSold
-    prev.hsCc90 += fact.hsCc90
-    prev.k12Sold += k12Sold
-    prev.k12Cc90 += fact.k12Cc90
-    if (manager) prev.manager = manager
-  }
-
-  return [...byName.values()]
-    .map((row) => accToIntraday(row, allowlist))
-    .filter((row): row is IntradayRow => row != null)
-}
-
-/** Playbook-shaped CSV (dashboard / look 26564) or the legacy Intraday look 26569 layout. */
-export function parseIntradayFromCsv(csv: string, allowlist: OverflowAllowlist): IntradayRow[] {
-  const fromPlaybook = factsToIntraday(parseLookerPlaybook(csv), allowlist)
-  if (fromPlaybook.length > 0) return fromPlaybook
-  return parseIntradayCsv(csv, allowlist)
 }
 
 function bucketVolume(
