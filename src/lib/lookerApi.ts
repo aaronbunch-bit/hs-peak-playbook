@@ -8,7 +8,16 @@ import { resolveOverflowAllowlist, serializeAllowlist, snapshotAllowlistAsOf, sn
 import { clearSharedOverflowChips, readSharedOverflowChips, writeSharedOverflowChips } from './overflowStore'
 import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
-import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
+import type {
+  DailyRow,
+  IntradayPayload,
+  IntradayRow,
+  LookerFact,
+  PacerPayload,
+  RoutingRangePayload,
+  Slice,
+  Staffing,
+} from './types'
 
 const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
 const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
@@ -106,6 +115,12 @@ async function lookQuery(token: string): Promise<LookerQuery> {
   return lookQueryFor(token, lookId())
 }
 
+/** The playbook CSV needs a per-rep pGC / CC90 tile; a duration-only tile parses to nothing. */
+function isPlaybookGrain(query: LookerQuery): boolean {
+  const fields = (query.fields ?? []).join(' ').toLowerCase()
+  return fields.includes('pgc') && fields.includes('cc90')
+}
+
 /** LookML dashboard tiles keep their query on result_maker; user-defined tiles use query. */
 async function dashboardQuery(token: string): Promise<LookerQuery> {
   const res = await lookerFetch(token, `/dashboards/${encodeURIComponent(dashboardId())}`)
@@ -115,18 +130,34 @@ async function dashboardQuery(token: string): Promise<LookerQuery> {
   }
   for (const element of dash.dashboard_elements ?? []) {
     const query = element.query ?? element.result_maker?.query
-    if (query?.model && query.view && query.fields?.length) return query
+    if (query?.model && query.view && query.fields?.length && isPlaybookGrain(query)) return query
   }
-  throw new Error('Looker dashboard has no query')
+  throw new Error('Looker dashboard has no per-rep pGC tile')
 }
 
-/** The dashboard is the connected source; the saved look stays as a fallback. */
-async function connectedQuery(token: string): Promise<{ query: LookerQuery; source: string }> {
-  try {
-    return { query: await dashboardQuery(token), source: `Looker dashboard ${dashboardId()}` }
-  } catch {
-    return { query: await lookQuery(token), source: `Looker look ${lookId()}` }
-  }
+type Connected = { query: LookerQuery; source: string }
+
+/**
+ * Dashboard first, saved look second, each opened only if the previous one yielded no rows:
+ * a tile that runs fine can still be the wrong grain for the playbook CSV.
+ */
+function connectedSources(token: string): Array<() => Promise<Connected | null>> {
+  return [
+    async () => {
+      try {
+        return { query: await dashboardQuery(token), source: `Looker dashboard ${dashboardId()}` }
+      } catch {
+        return null
+      }
+    },
+    async () => {
+      try {
+        return { query: await lookQuery(token), source: `Looker look ${lookId()}` }
+      } catch {
+        return null
+      }
+    },
+  ]
 }
 
 type QueryExtra = {
@@ -259,6 +290,30 @@ function restrictToHighSchool(facts: LookerFact[]): LookerFact[] {
   return out
 }
 
+type PlaybookFacts = { facts: LookerFact[]; wtdFacts: LookerFact[]; dailyFacts: LookerFact[] }
+
+async function playbookFacts(token: string, query: LookerQuery): Promise<PlaybookFacts> {
+  const [closed, wtdCsv, dodCsv] = await Promise.all([
+    runClosedWeeks(token, query),
+    runWtd(token, query).catch(() => ''),
+    runDod(token, query).catch(() => ''),
+  ])
+  let facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
+  let wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
+  let dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
+  if (facts.length === 0 && dailyFacts.length === 0) {
+    const [closedAll, wtdAll, dodAll] = await Promise.all([
+      runClosedWeeks(token, query, { peakNames: false }).catch(() => ({ csv: '', savedLook: false })),
+      runWtd(token, query, { peakNames: false }).catch(() => ''),
+      runDod(token, query, { peakNames: false }).catch(() => ''),
+    ])
+    facts = restrictToHighSchool(parseLookerPlaybook(closedAll.csv))
+    wtdFacts = restrictToHighSchool(wtdAll ? parseLookerPlaybook(wtdAll) : wtdFacts)
+    dailyFacts = restrictToHighSchool(dodAll ? parseLookerPlaybook(dodAll) : dailyFacts)
+  }
+  return { facts, wtdFacts, dailyFacts }
+}
+
 function rosterFromFacts(facts: LookerFact[]) {
   const byName = new Map(seed.roster.map((r) => [r.name, r]))
   const names = [...new Set(facts.map((f) => f.name))].sort((a, b) => a.localeCompare(b))
@@ -389,10 +444,18 @@ export async function fetchLookerIntraday(): Promise<IntradayPayload> {
     }
   }
   const token = await login()
-  const connected = await connectedQuery(token)
-  const csv = await runIntradayToday(token, connected.query)
-  let source = `${connected.source} · today`
-  let rows = factsToIntraday(parseLookerPlaybook(csv), resolved.allowlist)
+  let source = ''
+  let rows: IntradayRow[] = []
+  for (const open of connectedSources(token)) {
+    const connected = await open()
+    if (!connected) continue
+    const csv = await runIntradayToday(token, connected.query).catch(() => '')
+    rows = csv ? factsToIntraday(parseLookerPlaybook(csv), resolved.allowlist) : []
+    if (rows.length > 0) {
+      source = `${connected.source} · today`
+      break
+    }
+  }
   if (rows.length === 0) {
     const legacyQuery = await lookQueryFor(token, intradayLookId()).catch(() => null)
     const legacyCsv = legacyQuery ? await runIntradayCsv(token, legacyQuery).catch(() => '') : ''
@@ -430,12 +493,24 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     }
   }
   const token = await login()
-  const { query } = await connectedQuery(token)
-  const csv = await runRoutingRange(token, query, range.start, range.end)
+  let hadSource = false
+  for (const open of connectedSources(token)) {
+    const connected = await open()
+    if (!connected) continue
+    hadSource = true
+    const csv = await runRoutingRange(token, connected.query, range.start, range.end).catch(() => '')
+    const facts = csv ? factsToRouting(parseLookerPlaybook(csv), resolved.allowlist) : []
+    if (facts.length > 0) {
+      return { start: range.start, end: range.end, facts, ...allowlistMeta }
+    }
+  }
   return {
-    start: range.start,
-    end: range.end,
-    facts: factsToRouting(parseLookerPlaybook(csv), resolved.allowlist),
+    ...range,
+    facts: [],
+    empty: true,
+    emptyReason: hadSource
+      ? 'Looker returned no rows for this range.'
+      : 'Looker has no readable dashboard or look. Check LOOKER_DASHBOARD_ID and LOOKER_LOOK_ID.',
     ...allowlistMeta,
   }
 }
@@ -452,31 +527,26 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
   }
 
   const token = await login()
-  const { query, source } = await connectedQuery(token)
-  const [closed, wtdCsv, dodCsv] = await Promise.all([
-    runClosedWeeks(token, query),
-    runWtd(token, query).catch(() => ''),
-    runDod(token, query).catch(() => ''),
-  ])
-  let facts = restrictToHighSchool(parseLookerPlaybook(closed.csv))
-  let wtdFacts = restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : [])
-  let dailyFacts = restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : [])
-  if (facts.length === 0 && dailyFacts.length === 0) {
-    const [closedAll, wtdAll, dodAll] = await Promise.all([
-      runClosedWeeks(token, query, { peakNames: false }).catch(() => ({ csv: '', savedLook: false })),
-      runWtd(token, query, { peakNames: false }).catch(() => ''),
-      runDod(token, query, { peakNames: false }).catch(() => ''),
-    ])
-    facts = restrictToHighSchool(parseLookerPlaybook(closedAll.csv))
-    wtdFacts = restrictToHighSchool(wtdAll ? parseLookerPlaybook(wtdAll) : wtdFacts)
-    dailyFacts = restrictToHighSchool(dodAll ? parseLookerPlaybook(dodAll) : dailyFacts)
+  let attempted: { source: string; facts: PlaybookFacts } | null = null
+  for (const open of connectedSources(token)) {
+    const connected = await open()
+    if (!connected) continue
+    const got = await playbookFacts(token, connected.query).catch(() => null)
+    if (!got) continue
+    attempted ??= { source: connected.source, facts: got }
+    if (got.facts.length > 0 || got.dailyFacts.length > 0) {
+      attempted = { source: connected.source, facts: got }
+      break
+    }
   }
+  const source = attempted?.source ?? `Looker look ${lookId()}`
+  const facts = attempted?.facts ?? { facts: [], wtdFacts: [], dailyFacts: [] }
   return payloadFromFacts(
     slice,
-    facts,
-    wtdFacts,
+    facts.facts,
+    facts.wtdFacts,
     `${source} · High School Peak by Rep Name`,
-    dailyFacts,
+    facts.dailyFacts,
   )
 }
 
