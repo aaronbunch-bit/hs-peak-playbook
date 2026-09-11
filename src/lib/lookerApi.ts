@@ -170,18 +170,31 @@ function queryBody(
   } else {
     filters[REP_NAME_FIELD] = lookerRepNameFilter()
   }
+  const fields = extra?.fields ?? query.fields
   return {
     model: query.model,
     view: query.view,
-    fields: extra?.fields ?? query.fields,
+    fields,
     pivots: query.pivots,
     filters,
-    sorts: extra?.sorts ?? query.sorts,
+    sorts: selectableSorts(extra?.sorts ?? query.sorts, fields),
     limit: extra?.limit ?? (extra?.peakNames === false ? '10000' : (query.limit ?? '5000')),
     dynamic_fields: query.dynamic_fields,
     query_timezone: query.query_timezone,
     fill_fields: query.fill_fields,
   }
+}
+
+/**
+ * The look decides which mgr_name / date fields exist, so a sort we hardcode can name a
+ * field the clone never selected. Looker rejects or empties those rather than ignoring
+ * them, so keep only sorts on fields actually in the projection.
+ */
+function selectableSorts(sorts: string[] | undefined, fields: string[] | undefined): string[] | undefined {
+  if (!sorts?.length || !fields?.length) return sorts
+  const selected = new Set(fields)
+  const kept = sorts.filter((sort) => selected.has(sort.trim().split(/\s+/)[0]))
+  return kept.length === sorts.length ? sorts : kept
 }
 
 function dailyFields(query: LookerQuery): string[] {
@@ -237,9 +250,6 @@ async function runRoutingRange(
   })
 }
 
-/** Netlify's synchronous functions stop at 10s, so leave room to still answer. */
-const ROUTING_FALLBACK_BUDGET_MS = 6000
-
 const FILTER_LABELS: Record<string, string> = {
   'call_data_with_coselling.consultant_cc90': 'Consultant cc90',
   'call_data_with_coselling.expert_type': 'Expert Type',
@@ -271,6 +281,7 @@ const ROUTING_STAGES: Array<{ label: string; extra: QueryExtra; notice: string |
   const expert = 'call_data_with_coselling.expert_type'
   const business = 'call_data_with_coselling.business'
   const drops = [[cc90], [expert], [business], [cc90, expert, business]]
+  const timeOnlyNotice = droppedNotice([cc90, expert, business], true)
   return [
     { label: 'dashboard 7699 filters', extra: {}, notice: null },
     ...drops.map((keys) => ({
@@ -281,10 +292,23 @@ const ROUTING_STAGES: Array<{ label: string; extra: QueryExtra; notice: string |
     {
       label: 'time window only',
       extra: { filters: {}, ignoreSavedFilters: true },
-      notice: droppedNotice([cc90, expert, business], true),
+      notice: timeOnlyNotice,
+    },
+    {
+      // Closest thing to running the saved look over this range: the look's own
+      // projection, no sorts of ours, nothing but the date window.
+      label: 'look fields, time window only, no sorts',
+      extra: { filters: {}, ignoreSavedFilters: true, fields: undefined, sorts: [] },
+      notice: timeOnlyNotice,
     },
   ]
 })()
+
+/** First line of the CSV, so an empty range can show what Looker actually replied. */
+function firstLine(csv: string): string {
+  const line = csv.trim().split('\n')[0]?.trim() ?? ''
+  return line.length > 160 ? `${line.slice(0, 160)}…` : line
+}
 
 function restrictToHighSchool(facts: LookerFact[]): LookerFact[] {
   const out: LookerFact[] = []
@@ -459,32 +483,52 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
   }
   const token = await login()
   const query = await lookQuery(token)
-  const deadline = Date.now() + ROUTING_FALLBACK_BUDGET_MS
-  const tried: string[] = []
-  for (const stage of ROUTING_STAGES) {
-    if (tried.length > 0 && Date.now() > deadline) {
-      tried.push('stopped early to stay inside the request timeout')
-      break
+
+  const attempt = async (stage: (typeof ROUTING_STAGES)[number]) => {
+    const csv = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(
+      (err: unknown) => (err instanceof Error ? `!${err.message}` : '!failed'),
+    )
+    const failed = csv.startsWith('!')
+    const parsed = failed ? [] : parseLookerPlaybook(csv)
+    return {
+      stage,
+      facts: failed ? [] : factsToRouting(parsed, resolved.allowlist),
+      note: failed
+        ? `${stage.label}: ${csv.slice(1)}`
+        : `${stage.label}: ${csv.trim() ? csv.trim().split('\n').length : 0} lines, ${parsed.length} rep rows`,
+      header: failed ? '' : firstLine(csv),
     }
-    const csv = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(() => '')
-    const parsed = parseLookerPlaybook(csv)
-    const facts = factsToRouting(parsed, resolved.allowlist)
-    if (facts.length > 0) {
-      return {
-        start: range.start,
-        end: range.end,
-        facts,
-        notice: stage.notice ?? undefined,
-        ...allowlistMeta,
-      }
-    }
-    tried.push(`${stage.label}: ${csv.trim() ? csv.trim().split('\n').length : 0} lines, ${parsed.length} rep rows`)
   }
+
+  const [first] = ROUTING_STAGES
+  const lead = await attempt(first)
+  if (lead.facts.length > 0) {
+    return { start: range.start, end: range.end, facts: lead.facts, ...allowlistMeta }
+  }
+
+  // Concurrent so the whole cascade costs one round trip. Run sequentially and the
+  // function timeout truncates the diagnosis before the most informative stage.
+  const rest = await Promise.all(ROUTING_STAGES.slice(1).map(attempt))
+  const winner = rest.find((result) => result.facts.length > 0)
+  if (winner) {
+    return {
+      start: range.start,
+      end: range.end,
+      facts: winner.facts,
+      notice: winner.stage.notice ?? undefined,
+      ...allowlistMeta,
+    }
+  }
+
+  const attempts = [lead, ...rest]
+  const header = attempts.map((a) => a.header).find((line) => line.length > 0)
   return {
     ...range,
     facts: [],
     empty: true,
-    emptyReason: `No rows for this range. ${tried.join(' · ')}`,
+    emptyReason: `No rows for this range. ${attempts.map((a) => a.note).join(' · ')}${
+      header ? ` · Looker's columns were: ${header}` : ''
+    }`,
     ...allowlistMeta,
   }
 }
