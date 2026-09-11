@@ -138,13 +138,30 @@ function membershipAgnosticFilters(filters: Record<string, string>): Record<stri
   return out
 }
 
+/**
+ * Every clone re-windows the query, so any other granularity of the same call-created
+ * dimension the saved look happened to filter on would AND with the window we asked
+ * for and silently empty the range.
+ */
+function withoutCompetingTimeFilters(filters: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(filters)) {
+    const field = key.split('.').pop() ?? key
+    if (key !== LOOKER_TIME_FILTER && field.startsWith('call_created_at')) continue
+    out[key] = value
+  }
+  return out
+}
+
 function queryBody(
   query: LookerQuery,
   timeFilter: string,
   extra?: QueryExtra,
 ): Record<string, unknown> {
   const filters: Record<string, string> = {
-    ...(extra?.ignoreSavedFilters ? {} : membershipAgnosticFilters(query.filters ?? {})),
+    ...(extra?.ignoreSavedFilters
+      ? {}
+      : withoutCompetingTimeFilters(membershipAgnosticFilters(query.filters ?? {}))),
     [LOOKER_TIME_FILTER]: timeFilter,
     ...membershipAgnosticFilters(extra?.filters ?? {}),
   }
