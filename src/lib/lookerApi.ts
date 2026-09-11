@@ -115,10 +115,20 @@ async function lookQuery(token: string): Promise<LookerQuery> {
   return lookQueryFor(token, lookId())
 }
 
-/** The playbook CSV needs a per-rep pGC / CC90 tile; a duration-only tile parses to nothing. */
+/**
+ * The playbook CSV is Consultant × week/date pivoted by Audience, with separate HS-STEM and
+ * K12 Test Prep columns. A flat per-rep roll-up that keeps date and audience as dashboard
+ * filters — like the Call Duration per Rep tile — runs fine but parses to zero rows, so it
+ * cannot feed these views.
+ */
 function isPlaybookGrain(query: LookerQuery): boolean {
-  const fields = (query.fields ?? []).join(' ').toLowerCase()
-  return fields.includes('pgc') && fields.includes('cc90')
+  const fields = (query.fields ?? []).map((field) => field.toLowerCase())
+  const dimensions = [...fields, ...(query.pivots ?? []).map((pivot) => pivot.toLowerCase())]
+  const measures = fields.join(' ')
+  const hasPgcAndCc90 = measures.includes('pgc') && measures.includes('cc90')
+  const hasPeriod = fields.some((field) => field.includes('_week') || field.includes('_date'))
+  const hasAudience = dimensions.some((field) => field.includes('audience'))
+  return hasPgcAndCc90 && hasPeriod && hasAudience
 }
 
 /** LookML dashboard tiles keep their query on result_maker; user-defined tiles use query. */
@@ -132,32 +142,24 @@ async function dashboardQuery(token: string): Promise<LookerQuery> {
     const query = element.query ?? element.result_maker?.query
     if (query?.model && query.view && query.fields?.length && isPlaybookGrain(query)) return query
   }
-  throw new Error('Looker dashboard has no per-rep pGC tile')
+  throw new Error('no tile at Consultant × week × Audience grain')
 }
 
-type Connected = { query: LookerQuery; source: string }
+type Source = { label: string; query: () => Promise<LookerQuery> }
 
 /**
  * Dashboard first, saved look second, each opened only if the previous one yielded no rows:
  * a tile that runs fine can still be the wrong grain for the playbook CSV.
  */
-function connectedSources(token: string): Array<() => Promise<Connected | null>> {
+function connectedSources(token: string): Source[] {
   return [
-    async () => {
-      try {
-        return { query: await dashboardQuery(token), source: `Looker dashboard ${dashboardId()}` }
-      } catch {
-        return null
-      }
-    },
-    async () => {
-      try {
-        return { query: await lookQuery(token), source: `Looker look ${lookId()}` }
-      } catch {
-        return null
-      }
-    },
+    { label: `Looker dashboard ${dashboardId()}`, query: () => dashboardQuery(token) },
+    { label: `Looker look ${lookId()}`, query: () => lookQuery(token) },
   ]
+}
+
+function why(err: unknown): string {
+  return err instanceof Error ? err.message : 'unavailable'
 }
 
 type QueryExtra = {
@@ -446,13 +448,13 @@ export async function fetchLookerIntraday(): Promise<IntradayPayload> {
   const token = await login()
   let source = ''
   let rows: IntradayRow[] = []
-  for (const open of connectedSources(token)) {
-    const connected = await open()
-    if (!connected) continue
-    const csv = await runIntradayToday(token, connected.query).catch(() => '')
+  for (const candidate of connectedSources(token)) {
+    const query = await candidate.query().catch(() => null)
+    if (!query) continue
+    const csv = await runIntradayToday(token, query).catch(() => '')
     rows = csv ? factsToIntraday(parseLookerPlaybook(csv), resolved.allowlist) : []
     if (rows.length > 0) {
-      source = `${connected.source} · today`
+      source = `${candidate.label} · today`
       break
     }
   }
@@ -493,24 +495,33 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     }
   }
   const token = await login()
-  let hadSource = false
-  for (const open of connectedSources(token)) {
-    const connected = await open()
-    if (!connected) continue
-    hadSource = true
-    const csv = await runRoutingRange(token, connected.query, range.start, range.end).catch(() => '')
-    const facts = csv ? factsToRouting(parseLookerPlaybook(csv), resolved.allowlist) : []
+  const notes: string[] = []
+  for (const source of connectedSources(token)) {
+    let query: LookerQuery
+    try {
+      query = await source.query()
+    } catch (err) {
+      notes.push(`${source.label}: ${why(err)}`)
+      continue
+    }
+    let csv = ''
+    try {
+      csv = await runRoutingRange(token, query, range.start, range.end)
+    } catch (err) {
+      notes.push(`${source.label}: ${why(err)}`)
+      continue
+    }
+    const facts = factsToRouting(parseLookerPlaybook(csv), resolved.allowlist)
     if (facts.length > 0) {
       return { start: range.start, end: range.end, facts, ...allowlistMeta }
     }
+    notes.push(`${source.label}: ran but no rows matched the playbook columns`)
   }
   return {
     ...range,
     facts: [],
     empty: true,
-    emptyReason: hadSource
-      ? 'Looker returned no rows for this range.'
-      : 'Looker has no readable dashboard or look. Check LOOKER_DASHBOARD_ID and LOOKER_LOOK_ID.',
+    emptyReason: `No rows for this range. ${notes.join(' · ')}`,
     ...allowlistMeta,
   }
 }
@@ -528,14 +539,14 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
 
   const token = await login()
   let attempted: { source: string; facts: PlaybookFacts } | null = null
-  for (const open of connectedSources(token)) {
-    const connected = await open()
-    if (!connected) continue
-    const got = await playbookFacts(token, connected.query).catch(() => null)
+  for (const source of connectedSources(token)) {
+    const query = await source.query().catch(() => null)
+    if (!query) continue
+    const got = await playbookFacts(token, query).catch(() => null)
     if (!got) continue
-    attempted ??= { source: connected.source, facts: got }
+    attempted ??= { source: source.label, facts: got }
     if (got.facts.length > 0 || got.dailyFacts.length > 0) {
-      attempted = { source: connected.source, facts: got }
+      attempted = { source: source.label, facts: got }
       break
     }
   }

@@ -1,6 +1,10 @@
 # HS Peak Playbook
 
-pGC week-over-week tracker for High School Peak. Live data comes from Looker dashboard **sales::call_duration_per_rep_by_supergroup**, cloned for closed weeks, WTD, Routing, and Intraday. Look **26564** stays as a fallback. Local `npm run dev` can fall back to a committed seed extract if Looker is not configured.
+pGC week-over-week tracker for High School Peak. Live data is cloned for closed weeks, WTD, Routing, and Intraday from Looker dashboard **sales::call_duration_per_rep_by_supergroup** when it exposes a tile at the grain below, otherwise from look **26564**.
+
+Its current tile, *Call Duration By Rep, Manager, Supergroup*, is a flat per-rep roll-up — date and audience are dashboard filters, not columns — so it cannot feed these views and look 26564 serves the data. Making the dashboard the real source needs a tile (or a clone) that keeps Call Created At Week and Audience as fields.
+
+Local `npm run dev` can fall back to a committed seed extract if Looker is not configured.
 
 ```bash
 npm install
@@ -44,8 +48,8 @@ Copy `.env.example` to `.env` locally. Put the same keys in **Netlify → Site c
 | `LOOKER_BASE_URL` | Netlify + local `.env` | `https://varsitytutors.looker.com` |
 | `LOOKER_CLIENT_ID` | Netlify + local `.env` | Looker API3 client |
 | `LOOKER_CLIENT_SECRET` | Netlify + local `.env` | Looker API3 secret |
-| `LOOKER_DASHBOARD_ID` | Netlify + local `.env` | `sales::call_duration_per_rep_by_supergroup` |
-| `LOOKER_LOOK_ID` | Netlify + local `.env` | `26564` (fallback) |
+| `LOOKER_DASHBOARD_ID` | Netlify + local `.env` | `sales::call_duration_per_rep_by_supergroup`; used only if a tile matches the grain |
+| `LOOKER_LOOK_ID` | Netlify + local `.env` | `26564`; serves the data whenever the dashboard has no matching tile |
 | `ALLOWED_EMAIL_DOMAINS` | Netlify + local `.env` | Function allowlist, default `varsitytutors.com` |
 | `VITE_ALLOWED_EMAIL_DOMAINS` | Netlify (build) + local `.env` | Login-wall allowlist; must be present at **build** time |
 

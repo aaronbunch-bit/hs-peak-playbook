@@ -272,7 +272,8 @@ export function SettingsPanel({
             <ol className="mt-2 list-decimal space-y-2 pl-4">
               <li>API key lives on Netlify (`LOOKER_CLIENT_ID` / secret), never in the browser.</li>
               <li>
-                Closed weeks clone the call duration per rep by supergroup dashboard for the last 12 Sunday weeks so the rep drawer has
+                Closed weeks clone the connected dashboard tile when one matches this grain, else the HS Peak
+                Playbook look, for the last 12 Sunday weeks so the rep drawer has
                 history for the sparkline. Grain is Call Created At Week × Consultant, pivoted by Audience
                 (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). The clone filters Looker
                 by Rep Name from the High School Peak list. Looker Rep Manager, Work Group, and Super Group are
