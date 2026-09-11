@@ -272,8 +272,7 @@ export function SettingsPanel({
             <ol className="mt-2 list-decimal space-y-2 pl-4">
               <li>API key lives on Netlify (`LOOKER_CLIENT_ID` / secret), never in the browser.</li>
               <li>
-                Closed weeks clone the connected dashboard tile when one matches this grain, else the HS Peak
-                Playbook look, for the last 12 Sunday weeks so the rep drawer has
+                Closed weeks clone the HS Peak Playbook look for the last 12 Sunday weeks so the rep drawer has
                 history for the sparkline. Grain is Call Created At Week × Consultant, pivoted by Audience
                 (HS-STEM and K12 Test Prep). Total pGC is Supergroup (volume-weighted). The clone filters Looker
                 by Rep Name from the High School Peak list. Looker Rep Manager, Work Group, and Super Group are
@@ -281,9 +280,9 @@ export function SettingsPanel({
                 volume yet.
               </li>
               <li>
-                WTD DoD clones the same query at Call Created At Date (this Sunday → today) with dashboard 7699
+                WTD DoD clones the same look at Call Created At Date (this Sunday → today) with dashboard 7699
                 filters (Business, Expert Type, Consultant cc90) and the same Rep Name list. Each cell is that
-                day’s pGC; DoD is vs the prior calendar day. Intraday is that clone at Call Created At = today.
+                day’s pGC; DoD is vs the prior calendar day.
               </li>
               <li>
                 WTD is the newest stop on the Playbook week pager (› from the latest closed week). The daily

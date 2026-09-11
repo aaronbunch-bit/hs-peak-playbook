@@ -1,10 +1,10 @@
 import { canonicalHighSchoolName } from '../data/highSchoolWorkGroup'
 import { assignRoutingGroup, isOverflowExcludedManager } from '../data/routingGroups'
 import { toIsoDate } from './calendar'
-import { canonicalManager, impliedImpact, parseCsv } from './lookerExport'
+import { canonicalManager, parseCsv } from './lookerExport'
 import { chipsForName, type OverflowAllowlist } from './overflowAllowlist'
 import { expectedPgc, type LcCurves, type Targets, targetForSlice } from './settings'
-import type { IntradayPayload, IntradayRepRow, IntradayRow, LookerFact, Slice } from './types'
+import type { IntradayPayload, IntradayRepRow, IntradayRow, Slice } from './types'
 
 export function emptyIntraday(reason: string): IntradayPayload {
   return {
@@ -46,54 +46,6 @@ type Acc = {
 function pgc(sold: number, cc90: number): number | null {
   if (cc90 <= 0) return null
   return sold / cc90
-}
-
-function accToRow(row: Acc, allowlist: OverflowAllowlist): IntradayRow | null {
-  const chips = chipsForName(allowlist, row.name)
-  const provisional = assignRoutingGroup(row.name, row.manager, chips, 'supergroup')
-  if (provisional === 'overflow' && isOverflowExcludedManager(row.manager)) return null
-  const superCc90 = row.hsCc90 + row.k12Cc90
-  if (superCc90 <= 0) return null
-  return {
-    name: row.name,
-    manager: row.manager,
-    dedicatedHs: chips.dedicatedHs,
-    dedicatedK12: chips.dedicatedK12,
-    hsPgc: pgc(row.hsSold, row.hsCc90),
-    hsCc90: row.hsCc90,
-    k12Pgc: pgc(row.k12Sold, row.k12Cc90),
-    k12Cc90: row.k12Cc90,
-    superPgc: pgc(row.hsSold + row.k12Sold, superCc90),
-    superCc90,
-    hsSold: row.hsSold,
-    k12Sold: row.k12Sold,
-  }
-}
-
-/** Today's rows off the playbook-shaped clone: Consultant × HS-STEM / K12 Test Prep. */
-export function factsToIntraday(facts: LookerFact[], allowlist: OverflowAllowlist): IntradayRow[] {
-  const byName = new Map<string, Acc>()
-  for (const fact of facts) {
-    const name = canonicalHighSchoolName(fact.name) ?? fact.name.trim()
-    if (!name) continue
-    const key = name.toLowerCase()
-    const prev = byName.get(key) ?? {
-      name,
-      manager: canonicalManager(fact.manager),
-      hsSold: 0,
-      hsCc90: 0,
-      k12Sold: 0,
-      k12Cc90: 0,
-    }
-    prev.hsSold += impliedImpact(fact.hsPgc, fact.hsCc90, fact.hsImpact)
-    prev.hsCc90 += fact.hsCc90
-    prev.k12Sold += impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
-    prev.k12Cc90 += fact.k12Cc90
-    byName.set(key, prev)
-  }
-  return [...byName.values()]
-    .map((row) => accToRow(row, allowlist))
-    .filter((row): row is IntradayRow => row != null)
 }
 
 export function parseIntradayCsv(csv: string, allowlist: OverflowAllowlist): IntradayRow[] {

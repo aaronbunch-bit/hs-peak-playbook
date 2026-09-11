@@ -175,6 +175,82 @@ function layoutFromHeader(rows: string[][]): Cols {
   return VIS_COLS
 }
 
+function isHeaderRow(row: string[] | undefined): boolean {
+  if (!row?.length) return false
+  if (row.some((cell) => /^\d{4}-\d{2}-\d{2}/.test(cell.trim()))) return false
+  return row.some((cell) => /pgc|cc90|consultant|rep|week|date|audience|super\s?group|closed client/i.test(cell))
+}
+
+export function headerRowCount(rows: string[][]): number {
+  if (!isHeaderRow(rows[0])) return 0
+  return isHeaderRow(rows[1]) ? 2 : 1
+}
+
+/**
+ * Column label per index: the audience group from the pivot row is carried forward and
+ * joined to the field name, so `HS-STEM` + `CC90 Count` reads as `hs-stem cc90 count`.
+ */
+function headerLabels(rows: string[][], headerRows: number): string[] {
+  const top = headerRows > 1 ? (rows[0] ?? []) : []
+  const fields = rows[headerRows - 1] ?? []
+  const width = Math.max(top.length, fields.length)
+  const labels: string[] = []
+  let group = ''
+  for (let i = 0; i < width; i++) {
+    const heading = (top[i] ?? '').trim()
+    if (heading) group = heading
+    const field = (fields[i] ?? '').trim()
+    labels.push(`${group} ${field}`.trim().toLowerCase().replace(/\s+/g, ' '))
+  }
+  return labels
+}
+
+function findCol(labels: string[], test: (label: string) => boolean): number {
+  return labels.findIndex((label) => Boolean(label) && test(label))
+}
+
+function audienceCols(labels: string[], audience: RegExp) {
+  const of = (test: (label: string) => boolean) => findCol(labels, (l) => audience.test(l) && test(l))
+  return {
+    cc90: of((l) => l.includes('cc90') && !l.includes('mix')),
+    pgc: of((l) => l.includes('pgc')),
+    mix: of((l) => l.includes('cc90 mix') || l.includes('mix')),
+    impact: of((l) => l.includes('closed client')),
+  }
+}
+
+/**
+ * Resolve columns by header text. Looker column order shifts whenever a field is added or
+ * renamed upstream, and the fixed layouts below silently parse to zero rows when it does.
+ */
+function layoutFromLabels(labels: string[]): Cols | null {
+  const hs = audienceCols(labels, /hs-?\s?stem/)
+  const k12 = audienceCols(labels, /k12|k-12/)
+  const week = findCol(labels, (l) => /(^| )(week|date)$/.test(l) || l.includes('created at'))
+  const name = findCol(
+    labels,
+    (l) => !l.includes('manager') && /^(consultant|rep name|sales rep|name)$/.test(l),
+  )
+  const layout: Cols = {
+    week,
+    superGroup: findCol(labels, (l) => l.includes('super group') || l.includes('supergroup')),
+    name,
+    manager: findCol(labels, (l) => l.includes('manager') && !l.includes('id')),
+    hsCc90: hs.cc90,
+    hsImpact: hs.impact,
+    hsPgc: hs.pgc,
+    hsMix: hs.mix,
+    k12Cc90: k12.cc90,
+    k12Impact: k12.impact,
+    k12Pgc: k12.pgc,
+    k12Mix: k12.mix,
+    totalPgc: findCol(labels, (l) => l.includes('total pgc')),
+  }
+  const hasAudience = [hs.cc90, hs.pgc, k12.cc90, k12.pgc].some((col) => col >= 0)
+  if (week < 0 || name < 0 || !hasAudience) return null
+  return layout
+}
+
 function impactCount(raw: string | undefined, pgc: number | null, cc90: number, col: number): number {
   if (col >= 0) return parseCount(raw ?? '')
   if (pgc == null || cc90 <= 0) return 0
@@ -216,9 +292,14 @@ function nameCol(rows: string[][], fallback: number): number {
 
 export function parseLookerPlaybook(input: string | string[][]): LookerFact[] {
   const rows = typeof input === 'string' ? parseCsv(input) : input
-  const start = isPlaybookHeader(rows) ? 2 : 0
-  const layout = { ...layoutFromHeader(rows) }
-  layout.name = nameCol(rows, layout.name)
+  const headers = headerRowCount(rows)
+  const byLabel = headers > 0 ? layoutFromLabels(headerLabels(rows, headers)) : null
+  const start = byLabel ? headers : isPlaybookHeader(rows) ? 2 : 0
+  let layout = byLabel
+  if (!layout) {
+    layout = { ...layoutFromHeader(rows) }
+    layout.name = nameCol(rows, layout.name)
+  }
   const out: LookerFact[] = []
   for (const cols of rows.slice(start)) {
     const fact = rowToFact(cols, layout)
