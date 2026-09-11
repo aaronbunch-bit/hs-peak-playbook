@@ -126,6 +126,7 @@ export default function App() {
   const [routingAllowlistAsOf, setRoutingAllowlistAsOf] = useState<string | undefined>()
   const [routingLoading, setRoutingLoading] = useState(false)
   const [routingError, setRoutingError] = useState<string | null>(null)
+  const [routingNotice, setRoutingNotice] = useState<string | null>(null)
   const [intraday, setIntraday] = useState<IntradayPayload | null>(null)
   const [intradayLoading, setIntradayLoading] = useState(false)
   const [overflowMeta, setOverflowMeta] = useState<OverflowChipsPayload | null>(null)
@@ -263,6 +264,7 @@ export default function App() {
     let cancelled = false
     setRoutingLoading(true)
     setRoutingError(null)
+    setRoutingNotice(null)
     fetchRoutingData(routingStart, routingEnd)
       .then((data) => {
         if (cancelled) return
@@ -277,6 +279,7 @@ export default function App() {
           })
         }
         setRoutingError(data.empty ? (data.emptyReason ?? 'No rows for this range.') : null)
+        setRoutingNotice(data.notice ?? null)
         setRoutingLoading(false)
         setUpdatedAt(Date.now())
       })
@@ -284,6 +287,7 @@ export default function App() {
         if (cancelled) return
         setRoutingFacts([])
         setRoutingError('Could not load this date range.')
+        setRoutingNotice(null)
         setRoutingLoading(false)
       })
     return () => {
@@ -695,6 +699,8 @@ export default function App() {
               <p className="mx-auto max-w-6xl px-4 text-xs text-slate-400 sm:px-6">Loading range…</p>
             ) : routingError ? (
               <p className="mx-auto max-w-6xl px-4 text-sm text-amber-700 sm:px-6">{routingError}</p>
+            ) : routingNotice ? (
+              <p className="mx-auto max-w-6xl px-4 text-sm text-amber-700 sm:px-6">{routingNotice}</p>
             ) : null}
             <RoutingBlocks
               stats={routingStats}

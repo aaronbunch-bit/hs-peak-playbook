@@ -108,6 +108,8 @@ type QueryExtra = {
   sorts?: string[]
   peakNames?: boolean
   limit?: string
+  /** Drop the saved look's own filters, leaving only the time window. */
+  ignoreSavedFilters?: boolean
 }
 
 async function runQueryCsv(
@@ -142,7 +144,7 @@ function queryBody(
   extra?: QueryExtra,
 ): Record<string, unknown> {
   const filters: Record<string, string> = {
-    ...membershipAgnosticFilters(query.filters ?? {}),
+    ...(extra?.ignoreSavedFilters ? {} : membershipAgnosticFilters(query.filters ?? {})),
     [LOOKER_TIME_FILTER]: timeFilter,
     ...membershipAgnosticFilters(extra?.filters ?? {}),
   }
@@ -201,15 +203,71 @@ async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Pr
   })
 }
 
-async function runRoutingRange(token: string, query: LookerQuery, start: string, end: string): Promise<string> {
+async function runRoutingRange(
+  token: string,
+  query: LookerQuery,
+  start: string,
+  end: string,
+  extra?: QueryExtra,
+): Promise<string> {
   return runQueryCsv(token, query, `${start} to ${addDays(end, 1)}`, {
     fields: dailyFields(query),
     filters: DASHBOARD_7699_FILTERS,
     sorts: [`${DATE_FIELD} desc`, REP_NAME_FIELD],
     peakNames: false,
     limit: '50000',
+    ...extra,
   })
 }
+
+/** Netlify's synchronous functions stop at 10s, so leave room to still answer. */
+const ROUTING_FALLBACK_BUDGET_MS = 6000
+
+const FILTER_LABELS: Record<string, string> = {
+  'call_data_with_coselling.consultant_cc90': 'Consultant cc90',
+  'call_data_with_coselling.expert_type': 'Expert Type',
+  'call_data_with_coselling.business': 'Business',
+}
+
+function without(keys: string[]): Record<string, string> {
+  const out = { ...DASHBOARD_7699_FILTERS }
+  for (const key of keys) delete out[key]
+  return out
+}
+
+function droppedNotice(keys: string[], timeOnly = false): string {
+  const names = keys.map((key) => FILTER_LABELS[key] ?? key).join(', ')
+  const scope = timeOnly ? `${names}, and the saved look’s own filters` : names
+  return `Heads up: ${scope} matched no rows for this range, so these numbers ignore ${
+    keys.length > 1 || timeOnly ? 'them' : 'it'
+  } and will read wider than the Looker dashboard.`
+}
+
+/**
+ * Tightest scoping first, so a healthy range always uses the dashboard's own filters.
+ * A filter value that stops matching upstream empties the range without erroring, so
+ * peel the filters off one at a time rather than showing a blank tab. Each relaxed
+ * stage carries a notice because its totals no longer match the dashboard.
+ */
+const ROUTING_STAGES: Array<{ label: string; extra: QueryExtra; notice: string | null }> = (() => {
+  const cc90 = 'call_data_with_coselling.consultant_cc90'
+  const expert = 'call_data_with_coselling.expert_type'
+  const business = 'call_data_with_coselling.business'
+  const drops = [[cc90], [expert], [business], [cc90, expert, business]]
+  return [
+    { label: 'dashboard 7699 filters', extra: {}, notice: null },
+    ...drops.map((keys) => ({
+      label: `without ${keys.map((key) => FILTER_LABELS[key] ?? key).join(' / ')}`,
+      extra: { filters: without(keys) },
+      notice: droppedNotice(keys),
+    })),
+    {
+      label: 'time window only',
+      extra: { filters: {}, ignoreSavedFilters: true },
+      notice: droppedNotice([cc90, expert, business], true),
+    },
+  ]
+})()
 
 function restrictToHighSchool(facts: LookerFact[]): LookerFact[] {
   const out: LookerFact[] = []
@@ -384,20 +442,34 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
   }
   const token = await login()
   const query = await lookQuery(token)
-  const csv = await runRoutingRange(token, query, range.start, range.end)
-  const parsed = parseLookerPlaybook(csv)
-  const facts = factsToRouting(parsed, resolved.allowlist)
-  if (facts.length === 0) {
-    const lines = csv.trim() ? csv.trim().split('\n').length : 0
-    return {
-      ...range,
-      facts: [],
-      empty: true,
-      emptyReason: `No rows for this range. Looker sent ${lines} CSV lines, ${parsed.length} parsed as rep rows.`,
-      ...allowlistMeta,
+  const deadline = Date.now() + ROUTING_FALLBACK_BUDGET_MS
+  const tried: string[] = []
+  for (const stage of ROUTING_STAGES) {
+    if (tried.length > 0 && Date.now() > deadline) {
+      tried.push('stopped early to stay inside the request timeout')
+      break
     }
+    const csv = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(() => '')
+    const parsed = parseLookerPlaybook(csv)
+    const facts = factsToRouting(parsed, resolved.allowlist)
+    if (facts.length > 0) {
+      return {
+        start: range.start,
+        end: range.end,
+        facts,
+        notice: stage.notice ?? undefined,
+        ...allowlistMeta,
+      }
+    }
+    tried.push(`${stage.label}: ${csv.trim() ? csv.trim().split('\n').length : 0} lines, ${parsed.length} rep rows`)
   }
-  return { start: range.start, end: range.end, facts, ...allowlistMeta }
+  return {
+    ...range,
+    facts: [],
+    empty: true,
+    emptyReason: `No rows for this range. ${tried.join(' · ')}`,
+    ...allowlistMeta,
+  }
 }
 
 export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Promise<PacerPayload> {

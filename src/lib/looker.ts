@@ -131,6 +131,7 @@ export async function fetchRoutingData(start: string, end: string): Promise<Rout
           start: data.start ?? range.start,
           end: data.end ?? range.end,
           facts: data.facts,
+          notice: data.notice,
           empty: data.empty,
           emptyReason: data.emptyReason,
           allowlist: data.allowlist,

@@ -102,6 +102,8 @@ export type RoutingRangePayload = {
   /** Calendar date the chips were last pulled (YYYY-MM-DD). */
   allowlistAsOf?: string
   allowlistSource?: 'upload' | 'live' | 'snapshot'
+  /** Shown with the rows when a filter had to be relaxed to return any. */
+  notice?: string
   empty?: boolean
   emptyReason?: string
 }
