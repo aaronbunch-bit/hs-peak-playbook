@@ -111,6 +111,8 @@ type QueryExtra = {
   ignoreSavedFilters?: boolean
   /** Scope to HS-STEM and K12 Test Prep, and group by audience when the explore can. */
   audience?: AudienceUse
+  /** Drop the look's presentation layer: pivots, table calculations, dimension fill. */
+  plain?: boolean
 }
 
 async function runQueryCsv(
@@ -168,9 +170,6 @@ function isTimeishField(key: string): boolean {
  */
 function resolveTimeField(query: LookerQuery, projection?: string[]): string {
   const dims = discoveredDimensions(query)
-  // The projection comes first: a day-grain clone must be windowed by day, not by the
-  // week granularity the saved look happened to select. The explore's own dimensions are
-  // the backstop, because the look's query may not name the fields behind its columns.
   const groups = [
     (projection ?? []).filter(isTimeishField),
     Object.keys(query.filters ?? {}).filter(isTimeishField),
@@ -178,10 +177,21 @@ function resolveTimeField(query: LookerQuery, projection?: string[]): string {
     dims.filter((d) => isTimeishField(d.name)).map((d) => d.name),
     dims.filter((d) => /created at/.test(d.label)).map((d) => d.name),
   ]
+  // Grain beats provenance. A week dimension carries the week's start date, so an absolute
+  // `2026-09-22 to 2026-09-24` window only matches a week that happens to begin inside it —
+  // every other range comes back empty. Take the finest grain any pool offers before
+  // settling for the week the saved look selected.
+  for (const suffix of ['_time', '_date']) {
+    for (const candidates of groups) {
+      const hit = candidates.find((key) => key.endsWith(suffix))
+      if (hit) return hit
+    }
+  }
   for (const candidates of groups) {
     if (candidates.length === 0) continue
-    const byGrain = (suffix: string) => candidates.find((key) => key.endsWith(suffix))
-    return byGrain('_time') ?? byGrain('_date') ?? byGrain('_week') ?? candidates[0]
+    const week = candidates.find((key) => key.endsWith('_week')) ?? candidates[0]
+    const twin = week.replace(/_week$/, '_date')
+    return twin !== week && dims.some((d) => d.name === twin) ? twin : week
   }
   return LOOKER_TIME_FILTER
 }
@@ -206,6 +216,26 @@ function resolveRepNameField(query: LookerQuery): string {
 type ExploreField = { name: string; label: string }
 
 let exploreCache: { key: string; dims: ExploreField[]; at: number } | null = null
+
+/** Day grain: swap whichever call-created week dimension the look selected for its date twin. */
+function dailyFields(query: LookerQuery): string[] {
+  return (query.fields ?? []).map((field) =>
+    isTimeishField(field) && field.endsWith('_week') ? field.replace(/_week$/, '_date') : field,
+  )
+}
+
+/**
+ * The date, the rep, and the measures. Every other dimension the look selects is a join
+ * Looker has to satisfy before a row can come back, so this is the projection to fall back
+ * to when the full one returns nothing. Anything the explore does not list as a dimension
+ * is a measure, which is what makes this narrower than the look rather than emptier.
+ */
+function bareFields(query: LookerQuery): string[] {
+  const dims = new Set(discoveredDimensions(query).map((d) => d.name))
+  const fields = dailyFields(query)
+  const kept = fields.filter((f) => !dims.has(f) || isTimeishField(f) || isRepNameField(f))
+  return kept.length > 1 ? kept : fields
+}
 
 function exploreKey(query: LookerQuery): string {
   return `${query.model ?? ''}|${query.view ?? ''}`
@@ -267,17 +297,23 @@ function queryBody(
   } else {
     filters[resolveRepNameField(query)] = lookerRepNameFilter()
   }
+  // The look's pivot, table calculations and dimension fill are all written against the
+  // week dimension it selects. Re-point the query at a day window and they still apply,
+  // which Looker answers with a header row and no data instead of an error. Dropping them
+  // turns the pivoted audience into a plain row dimension, which we fold back together
+  // while parsing, and leaves pGC to be computed from Closed Clients over CC90.
+  const plain = extra?.plain === true
   return {
     model: query.model,
     view: query.view,
     fields: projection,
-    pivots: query.pivots,
+    pivots: plain ? undefined : query.pivots,
     filters,
     sorts: selectableSorts(extra?.sorts ?? query.sorts, projection),
     limit: extra?.limit ?? (extra?.peakNames === false ? '10000' : (query.limit ?? '5000')),
-    dynamic_fields: query.dynamic_fields,
+    dynamic_fields: plain ? undefined : query.dynamic_fields,
     query_timezone: query.query_timezone,
-    fill_fields: query.fill_fields,
+    fill_fields: plain ? undefined : query.fill_fields,
   }
 }
 
@@ -291,13 +327,6 @@ function selectableSorts(sorts: string[] | undefined, fields: string[] | undefin
   const selected = new Set(fields)
   const kept = sorts.filter((sort) => selected.has(sort.trim().split(/\s+/)[0]))
   return kept.length === sorts.length ? sorts : kept
-}
-
-/** Day grain: swap whichever call-created week dimension the look selected for its date twin. */
-function dailyFields(query: LookerQuery): string[] {
-  return (query.fields ?? []).map((field) =>
-    isTimeishField(field) && field.endsWith('_week') ? field.replace(/_week$/, '_date') : field,
-  )
 }
 
 /** The date dimension as it appears in the day-grain projection, for sorting. */
@@ -350,6 +379,7 @@ async function audienceFieldFor(token: string, query: LookerQuery): Promise<Audi
       const csv = await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, {
         audience: { field, group: true },
         peakNames: false,
+        plain: true,
         limit: '1',
       }).catch(() => '')
       const facts = parseLookerPlaybook(csv)
@@ -371,7 +401,10 @@ async function runClosedWeeks(
   extra?: QueryExtra,
 ): Promise<{ csv: string; savedLook: boolean }> {
   try {
-    return { csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, extra), savedLook: false }
+    return {
+      csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, { plain: true, ...extra }),
+      savedLook: false,
+    }
   } catch {
     return { csv: await runSavedLook(token), savedLook: true }
   }
@@ -384,6 +417,7 @@ async function runWtd(token: string, query: LookerQuery, extra?: QueryExtra): Pr
     filters: DASHBOARD_7699_FILTERS,
     peakNames: extra?.peakNames,
     audience: extra?.audience,
+    plain: true,
   })
 }
 
@@ -396,6 +430,7 @@ async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Pr
     sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: extra?.peakNames,
     audience: extra?.audience,
+    plain: true,
   })
 }
 
@@ -411,6 +446,7 @@ async function runRoutingRange(
     filters: DASHBOARD_7699_FILTERS,
     sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: false,
+    plain: true,
     limit: '50000',
     ...extra,
   })
@@ -455,16 +491,20 @@ type RoutingStage = {
 const NO_AUDIENCE_NOTICE =
   'Looker returned no audience split for this range, so HS-STEM and K12 Test Prep are combined.'
 
+const BARE_NOTICE =
+  'Heads up: every filter the Looker dashboard applies matched no rows for this range, so these numbers count all calls and will read wider than the dashboard.'
+
 /**
  * Audience-split first, so HS-STEM and K12 Test Prep have their own numbers. The blended
  * stages below are the fallback for a look or explore with no audience dimension.
  */
-function routingStages(audience: AudienceUse | null): RoutingStage[] {
-  if (!audience) return BLENDED_STAGES
+function routingStages(query: LookerQuery, audience: AudienceUse | null): RoutingStage[] {
+  const blended = [...BLENDED_STAGES, bareStage(query)]
+  if (!audience) return blended
   // Even without a split the filter belongs on every fallback, so the blended number
   // stays scoped to the two audiences rather than counting the whole business. The bare
   // last resorts stay unscoped so a wrong audience field can never empty every stage.
-  const scoped = BLENDED_STAGES.map((stage) =>
+  const scoped = blended.map((stage) =>
     stage.lastResort
       ? stage
       : { ...stage, extra: { ...stage.extra, audience: { field: audience.field, group: false } } },
@@ -479,6 +519,20 @@ function routingStages(audience: AudienceUse | null): RoutingStage[] {
     },
     ...scoped,
   ]
+}
+
+/**
+ * Nothing left but the date window and the measures. If even this is empty then the range
+ * genuinely has no calls, rather than the clone having inherited something from the look
+ * that quietly filters every row away.
+ */
+function bareStage(query: LookerQuery): RoutingStage {
+  return {
+    label: 'date, rep, and measures only',
+    extra: { filters: {}, ignoreSavedFilters: true, fields: bareFields(query), sorts: [] },
+    notice: `${BARE_NOTICE} ${NO_AUDIENCE_NOTICE}`,
+    lastResort: true,
+  }
 }
 
 const BLENDED_STAGES: RoutingStage[] = (() => {
@@ -694,7 +748,7 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
 
   const cachedAudience = audienceFieldCache
   const audience = await audienceFieldFor(token, query)
-  let stages = routingStages(audience)
+  let stages = routingStages(query, audience)
   const attempt = async (stage: RoutingStage) => {
     const csv = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(
       (err: unknown) => (err instanceof Error ? `!${err.message}` : '!failed'),
@@ -720,7 +774,7 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     audienceFieldCache = null
     const reprobed = await audienceFieldFor(token, query)
     if (reprobed?.field !== audience?.field || reprobed?.group !== audience?.group) {
-      stages = routingStages(reprobed)
+      stages = routingStages(query, reprobed)
       lead = await attempt(stages[0])
     }
   }
@@ -756,9 +810,10 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     empty: true,
     emptyReason: `No rows for this range. ${attempts.map((a) => a.note).join(' · ')} · windowed on ${resolveTimeField(
       query,
+      dailyFields(query),
     )} · rep name ${resolveRepNameField(query)} · look ${lookId()} selects [${(query.fields ?? []).join(
       ', ',
-    )}] from ${query.model}/${query.view} · explore exposed ${
+    )}] from ${query.model}/${query.view} · bare projection [${bareFields(query).join(', ')}] · explore exposed ${
       discoveredDimensions(query).length
     } dimensions${header ? ` · Looker's columns were: ${header}` : ''}`,
     ...allowlistMeta,

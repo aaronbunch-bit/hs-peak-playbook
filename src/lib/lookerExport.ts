@@ -374,12 +374,19 @@ function rowToFact(cols: string[], layout: Cols): LookerFact | null {
   const week = (cols[layout.week] ?? '').trim().slice(0, 10)
   const name = (cols[layout.name] ?? '').trim()
   if (!week || !name || !/^\d{4}-\d{2}-\d{2}$/.test(week)) return null
-  const hsPgc = parsePgc(cols[layout.hsPgc] ?? '')
-  const k12Pgc = parsePgc(cols[layout.k12Pgc] ?? '')
   const hsCc90 = parseCount(cols[layout.hsCc90] ?? '')
   const k12Cc90 = parseCount(cols[layout.k12Cc90] ?? '')
   const totalCc90 = layout.totalCc90 >= 0 ? parseCount(cols[layout.totalCc90] ?? '') : null
   const totalImpact = layout.totalImpact >= 0 ? parseCount(cols[layout.totalImpact] ?? '') : null
+  // pGC is Closed Clients over CC90. Looker only ships it as a table calculation, which a
+  // re-windowed clone of the look cannot carry, so derive it from the two counts instead.
+  const rawHsPgc = parsePgc(cols[layout.hsPgc] ?? '')
+  const rawK12Pgc = parsePgc(cols[layout.k12Pgc] ?? '')
+  const hsImpact = impactCount(cols[layout.hsImpact], rawHsPgc, hsCc90, layout.hsImpact)
+  const k12Impact = impactCount(cols[layout.k12Impact], rawK12Pgc, k12Cc90, layout.k12Impact)
+  const ratio = (impact: number, cc90: number) => (cc90 > 0 ? round4(impact / cc90) : null)
+  const hsPgc = rawHsPgc ?? ratio(hsImpact, hsCc90)
+  const k12Pgc = rawK12Pgc ?? ratio(k12Impact, k12Cc90)
   const totalPgc = parsePgc(cols[layout.totalPgc] ?? '')
   return {
     week,
@@ -389,11 +396,11 @@ function rowToFact(cols: string[], layout: Cols): LookerFact | null {
     hsCc90,
     hsPgc,
     hsMix: parsePgc(cols[layout.hsMix] ?? ''),
-    hsImpact: impactCount(cols[layout.hsImpact], hsPgc, hsCc90, layout.hsImpact),
+    hsImpact,
     k12Cc90,
     k12Pgc,
     k12Mix: parsePgc(cols[layout.k12Mix] ?? ''),
-    k12Impact: impactCount(cols[layout.k12Impact], k12Pgc, k12Cc90, layout.k12Impact),
+    k12Impact,
     totalPgc: totalPgc ?? (totalCc90 && totalImpact != null ? round4(totalImpact / totalCc90) : null),
     ...(totalCc90 != null ? { totalCc90 } : {}),
     ...(totalImpact != null ? { totalImpact } : {}),

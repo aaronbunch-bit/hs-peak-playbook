@@ -75,13 +75,16 @@ export function factsToRouting(facts: LookerFact[], allowlist: OverflowAllowlist
     const provisional = assignRoutingGroup(name, fact.manager, chips, 'supergroup')
     if (provisional === 'overflow' && isOverflowExcludedManager(fact.manager)) continue
     const key = name.toLowerCase()
-    const hsSold = (fact.hsPgc ?? 0) * fact.hsCc90
-    const k12Sold = (fact.k12Pgc ?? 0) * fact.k12Cc90
     const hsImpact = impliedImpact(fact.hsPgc, fact.hsCc90, fact.hsImpact)
     const k12Impact = impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
     const totalCc90 = fact.totalCc90 ?? 0
     const totalImpact = fact.totalCc90 == null ? 0 : impliedImpact(fact.totalPgc, totalCc90, fact.totalImpact)
-    const totalSold = fact.totalCc90 == null ? null : (fact.totalPgc ?? 0) * totalCc90
+    // Closed Clients is the count Looker measured; pGC is a ratio derived from it and
+    // rounded, so weight the group average by the count whenever we have one.
+    const hsSold = hsImpact > 0 ? hsImpact : (fact.hsPgc ?? 0) * fact.hsCc90
+    const k12Sold = k12Impact > 0 ? k12Impact : (fact.k12Pgc ?? 0) * fact.k12Cc90
+    const totalSold =
+      fact.totalCc90 == null ? null : totalImpact > 0 ? totalImpact : (fact.totalPgc ?? 0) * totalCc90
     const prev = byName.get(key)
     if (!prev) {
       byName.set(key, {
