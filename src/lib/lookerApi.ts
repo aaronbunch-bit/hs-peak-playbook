@@ -167,11 +167,18 @@ function isTimeishField(key: string): boolean {
  * which Looker answers with a header and no rows rather than an error.
  */
 function resolveTimeField(query: LookerQuery, projection?: string[]): string {
+  const dims = discoveredDimensions(query)
   // The projection comes first: a day-grain clone must be windowed by day, not by the
-  // week granularity the saved look happened to select.
-  const groups = [projection ?? [], Object.keys(query.filters ?? {}), query.fields ?? []]
-  for (const group of groups) {
-    const candidates = group.filter(isTimeishField)
+  // week granularity the saved look happened to select. The explore's own dimensions are
+  // the backstop, because the look's query may not name the fields behind its columns.
+  const groups = [
+    (projection ?? []).filter(isTimeishField),
+    Object.keys(query.filters ?? {}).filter(isTimeishField),
+    (query.fields ?? []).filter(isTimeishField),
+    dims.filter((d) => isTimeishField(d.name)).map((d) => d.name),
+    dims.filter((d) => /created at/.test(d.label)).map((d) => d.name),
+  ]
+  for (const candidates of groups) {
     if (candidates.length === 0) continue
     const byGrain = (suffix: string) => candidates.find((key) => key.endsWith(suffix))
     return byGrain('_time') ?? byGrain('_date') ?? byGrain('_week') ?? candidates[0]
@@ -186,7 +193,52 @@ function isRepNameField(key: string): boolean {
 }
 
 function resolveRepNameField(query: LookerQuery): string {
-  return (query.fields ?? []).find(isRepNameField) ?? REP_NAME_FIELD
+  const fromQuery = (query.fields ?? []).find(isRepNameField)
+  if (fromQuery) return fromQuery
+  const dims = discoveredDimensions(query)
+  return (
+    dims.find((d) => isRepNameField(d.name))?.name ??
+    dims.find((d) => /(^| )(rep name|consultant|sales rep)$/.test(d.label))?.name ??
+    REP_NAME_FIELD
+  )
+}
+
+type ExploreField = { name: string; label: string }
+
+let exploreCache: { key: string; dims: ExploreField[]; at: number } | null = null
+
+function exploreKey(query: LookerQuery): string {
+  return `${query.model ?? ''}|${query.view ?? ''}`
+}
+
+/** Dimensions of the look's explore, resolved once so field IDs never have to be guessed. */
+function discoveredDimensions(query: LookerQuery): ExploreField[] {
+  return exploreCache?.key === exploreKey(query) ? exploreCache.dims : []
+}
+
+/**
+ * The saved look's query does not always carry the field IDs behind the columns it
+ * returns, so read them from the explore itself and resolve by name or column label.
+ */
+async function discoverExplore(token: string, query: LookerQuery): Promise<void> {
+  const key = exploreKey(query)
+  if (exploreCache?.key === key && Date.now() - exploreCache.at < AUDIENCE_CACHE_MS) return
+  if (!query.model || !query.view) return
+  const res = await lookerFetch(
+    token,
+    `/lookml_models/${encodeURIComponent(query.model)}/explores/${encodeURIComponent(query.view)}`,
+  ).catch(() => null)
+  if (!res?.ok) return
+  const data = (await res.json().catch(() => null)) as {
+    fields?: { dimensions?: Array<{ name?: string; label?: string; label_short?: string; hidden?: boolean }> }
+  } | null
+  const dims = (data?.fields?.dimensions ?? [])
+    .filter((d) => d.name && !d.hidden)
+    .map((d) => ({
+      name: d.name as string,
+      label: (d.label ?? d.label_short ?? '').trim().toLowerCase().replace(/\s+/g, ' '),
+    }))
+  exploreCache = { key, dims, at: Date.now() }
 }
 
 function queryBody(
@@ -194,7 +246,8 @@ function queryBody(
   timeFilter: string,
   extra?: QueryExtra,
 ): Record<string, unknown> {
-  const base = extra?.fields ?? query.fields
+  // An empty list is not the same as "no opinion": Looker rejects a query selecting nothing.
+  const base = (extra?.fields ?? query.fields)?.length ? (extra?.fields ?? query.fields) : undefined
   const audience = extra?.audience
   const projection =
     audience?.group && base && !base.includes(audience.field) ? [...base, audience.field] : base
@@ -257,28 +310,14 @@ const AUDIENCE_VALUES = 'HS-STEM,K12 Test Prep'
 /** How to use the explore's audience dimension: always filter, group only if it splits. */
 type AudienceUse = { field: string; group: boolean }
 
-/** Every audience dimension the explore exposes, so the field does not have to be guessed. */
-async function exploreAudienceFields(token: string, query: LookerQuery): Promise<string[]> {
-  if (!query.model || !query.view) return []
-  const res = await lookerFetch(
-    token,
-    `/lookml_models/${encodeURIComponent(query.model)}/explores/${encodeURIComponent(query.view)}`,
-  ).catch(() => null)
-  if (!res?.ok) return []
-  const data = (await res.json().catch(() => null)) as {
-    fields?: { dimensions?: Array<{ name?: string; label?: string; hidden?: boolean }> }
-  } | null
-  return (data?.fields?.dimensions ?? [])
-    .filter((d) => d.name && !d.hidden && /audience/i.test(`${d.name} ${d.label ?? ''}`))
-    .map((d) => d.name as string)
-}
-
 /** Audience dimensions worth trying, the look's own first, then whatever the explore has. */
-async function audienceCandidates(token: string, query: LookerQuery): Promise<string[]> {
+function audienceCandidates(query: LookerQuery): string[] {
   const own = [...Object.keys(query.filters ?? {}), ...(query.fields ?? [])].filter((key) =>
     /audience/.test(key.split('.').pop() ?? key),
   )
-  const discovered = await exploreAudienceFields(token, query)
+  const discovered = discoveredDimensions(query)
+    .filter((d) => /audience/.test(`${d.name} ${d.label}`))
+    .map((d) => d.name)
   return [
     ...new Set([
       ...own,
@@ -305,7 +344,7 @@ async function audienceFieldFor(token: string, query: LookerQuery): Promise<Audi
   const key = `${lookId()}|${query.model ?? ''}|${query.view ?? ''}`
   const fresh = audienceFieldCache && Date.now() - audienceFieldCache.at < AUDIENCE_CACHE_MS
   if (fresh && audienceFieldCache?.key === key) return audienceFieldCache.use
-  const candidates = await audienceCandidates(token, query)
+  const candidates = audienceCandidates(query)
   const probes = await Promise.all(
     candidates.map(async (field) => {
       const csv = await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, {
@@ -651,6 +690,7 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
   }
   const token = await login()
   const query = await lookQuery(token)
+  await discoverExplore(token, query)
 
   const cachedAudience = audienceFieldCache
   const audience = await audienceFieldFor(token, query)
@@ -716,7 +756,11 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     empty: true,
     emptyReason: `No rows for this range. ${attempts.map((a) => a.note).join(' · ')} · windowed on ${resolveTimeField(
       query,
-    )} · rep name ${resolveRepNameField(query)}${header ? ` · Looker's columns were: ${header}` : ''}`,
+    )} · rep name ${resolveRepNameField(query)} · look ${lookId()} selects [${(query.fields ?? []).join(
+      ', ',
+    )}] from ${query.model}/${query.view} · explore exposed ${
+      discoveredDimensions(query).length
+    } dimensions${header ? ` · Looker's columns were: ${header}` : ''}`,
     ...allowlistMeta,
   }
 }
@@ -734,6 +778,7 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
 
   const token = await login()
   const query = await lookQuery(token)
+  await discoverExplore(token, query)
 
   const trio = async (extra: QueryExtra) => {
     const [closed, wtdCsv, dodCsv] = await Promise.all([
