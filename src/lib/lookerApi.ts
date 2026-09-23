@@ -109,8 +109,8 @@ type QueryExtra = {
   limit?: string
   /** Drop the saved look's own filters, leaving only the time window. */
   ignoreSavedFilters?: boolean
-  /** Group by this audience dimension so HS-STEM and K12 Test Prep split apart. */
-  audienceField?: string
+  /** Scope to HS-STEM and K12 Test Prep, and group by audience when the explore can. */
+  audience?: AudienceUse
 }
 
 async function runQueryCsv(
@@ -195,9 +195,9 @@ function queryBody(
   extra?: QueryExtra,
 ): Record<string, unknown> {
   const base = extra?.fields ?? query.fields
-  const audienceField = extra?.audienceField
+  const audience = extra?.audience
   const projection =
-    audienceField && base && !base.includes(audienceField) ? [...base, audienceField] : base
+    audience?.group && base && !base.includes(audience.field) ? [...base, audience.field] : base
   const timeField = resolveTimeField(query, projection)
   const filters: Record<string, string> = {
     ...(extra?.ignoreSavedFilters
@@ -206,7 +206,7 @@ function queryBody(
     [timeField]: timeFilter,
     ...membershipAgnosticFilters(extra?.filters ?? {}),
   }
-  if (audienceField) filters[audienceField] = AUDIENCE_VALUES
+  if (audience) filters[audience.field] = AUDIENCE_VALUES
   if (extra?.peakNames === false) {
     for (const key of Object.keys(filters)) {
       if (isRepNameField(key)) delete filters[key]
@@ -254,49 +254,76 @@ function dailyDateField(query: LookerQuery): string {
 
 const AUDIENCE_VALUES = 'HS-STEM,K12 Test Prep'
 
-/** Audience dimensions worth grouping by, the look's own first. */
-function audienceCandidates(query: LookerQuery): string[] {
+/** How to use the explore's audience dimension: always filter, group only if it splits. */
+type AudienceUse = { field: string; group: boolean }
+
+/** Every audience dimension the explore exposes, so the field does not have to be guessed. */
+async function exploreAudienceFields(token: string, query: LookerQuery): Promise<string[]> {
+  if (!query.model || !query.view) return []
+  const res = await lookerFetch(
+    token,
+    `/lookml_models/${encodeURIComponent(query.model)}/explores/${encodeURIComponent(query.view)}`,
+  ).catch(() => null)
+  if (!res?.ok) return []
+  const data = (await res.json().catch(() => null)) as {
+    fields?: { dimensions?: Array<{ name?: string; label?: string; hidden?: boolean }> }
+  } | null
+  return (data?.fields?.dimensions ?? [])
+    .filter((d) => d.name && !d.hidden && /audience/i.test(`${d.name} ${d.label ?? ''}`))
+    .map((d) => d.name as string)
+}
+
+/** Audience dimensions worth trying, the look's own first, then whatever the explore has. */
+async function audienceCandidates(token: string, query: LookerQuery): Promise<string[]> {
   const own = [...Object.keys(query.filters ?? {}), ...(query.fields ?? [])].filter((key) =>
     /audience/.test(key.split('.').pop() ?? key),
   )
+  const discovered = await exploreAudienceFields(token, query)
   return [
     ...new Set([
       ...own,
+      ...discovered,
       // The Intraday query already groups by this one on the same model.
       'contact_audience_subject_calls.audience_subject',
       'call_data_with_coselling.audience',
     ]),
-  ]
+  ].slice(0, 8)
 }
 
-let audienceFieldCache: { key: string; field: string | null; at: number } | null = null
+let audienceFieldCache: { key: string; use: AudienceUse | null; at: number } | null = null
 
 /** Re-probe periodically so a warm container does not sit on "no audience field" forever. */
 const AUDIENCE_CACHE_MS = 10 * 60 * 1000
 
 /**
- * Which audience dimension this explore actually has, or null when it has none. A field the
- * explore does not expose errors, and one it ignores comes back blended, so require a real
- * split. Cached per look because otherwise every load re-probes every candidate.
+ * Which audience dimension this explore has. A field it does not expose errors out; one it
+ * exposes but cannot split by still returns rows, and is worth keeping as a filter so the
+ * numbers stay scoped to HS-STEM and K12 Test Prep the way the dashboard scoped them.
+ * Cached per look because otherwise every load re-probes every candidate.
  */
-async function audienceFieldFor(token: string, query: LookerQuery): Promise<string | null> {
+async function audienceFieldFor(token: string, query: LookerQuery): Promise<AudienceUse | null> {
   const key = `${lookId()}|${query.model ?? ''}|${query.view ?? ''}`
   const fresh = audienceFieldCache && Date.now() - audienceFieldCache.at < AUDIENCE_CACHE_MS
-  if (fresh && audienceFieldCache?.key === key) return audienceFieldCache.field
+  if (fresh && audienceFieldCache?.key === key) return audienceFieldCache.use
+  const candidates = await audienceCandidates(token, query)
   const probes = await Promise.all(
-    audienceCandidates(query).map(async (field) => {
+    candidates.map(async (field) => {
       const csv = await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, {
-        audienceField: field,
+        audience: { field, group: true },
         peakNames: false,
         limit: '1',
       }).catch(() => '')
       const facts = parseLookerPlaybook(csv)
-      return { field, ok: facts.length > 0 && facts.some((fact) => fact.totalCc90 == null) }
+      return { field, exists: csv.trim().length > 0, splits: facts.some((fact) => fact.totalCc90 == null) }
     }),
   )
-  const field = probes.find((p) => p.ok)?.field ?? null
-  audienceFieldCache = { key, field, at: Date.now() }
-  return field
+  const best = probes.find((p) => p.splits) ?? probes.find((p) => p.exists)
+  audienceFieldCache = {
+    key,
+    use: best ? { field: best.field, group: best.splits } : null,
+    at: Date.now(),
+  }
+  return audienceFieldCache.use
 }
 
 async function runClosedWeeks(
@@ -317,7 +344,7 @@ async function runWtd(token: string, query: LookerQuery, extra?: QueryExtra): Pr
   return runQueryCsv(token, query, `${sunday} to ${today}`, {
     filters: DASHBOARD_7699_FILTERS,
     peakNames: extra?.peakNames,
-    audienceField: extra?.audienceField,
+    audience: extra?.audience,
   })
 }
 
@@ -329,7 +356,7 @@ async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Pr
     filters: DASHBOARD_7699_FILTERS,
     sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: extra?.peakNames,
-    audienceField: extra?.audienceField,
+    audience: extra?.audience,
   })
 }
 
@@ -382,6 +409,8 @@ type RoutingStage = {
   notice: string | null
   /** Reject a result that came back blended, so the blended stages own that outcome. */
   requiresSplit?: boolean
+  /** Never scoped by audience, so there is always a stage a bad audience field cannot break. */
+  lastResort?: boolean
 }
 
 const NO_AUDIENCE_NOTICE =
@@ -391,16 +420,25 @@ const NO_AUDIENCE_NOTICE =
  * Audience-split first, so HS-STEM and K12 Test Prep have their own numbers. The blended
  * stages below are the fallback for a look or explore with no audience dimension.
  */
-function routingStages(audienceField: string | null): RoutingStage[] {
-  if (!audienceField) return BLENDED_STAGES
+function routingStages(audience: AudienceUse | null): RoutingStage[] {
+  if (!audience) return BLENDED_STAGES
+  // Even without a split the filter belongs on every fallback, so the blended number
+  // stays scoped to the two audiences rather than counting the whole business. The bare
+  // last resorts stay unscoped so a wrong audience field can never empty every stage.
+  const scoped = BLENDED_STAGES.map((stage) =>
+    stage.lastResort
+      ? stage
+      : { ...stage, extra: { ...stage.extra, audience: { field: audience.field, group: false } } },
+  )
+  if (!audience.group) return scoped
   return [
     {
-      label: `audience split on ${audienceField}`,
-      extra: { audienceField },
+      label: `audience split on ${audience.field}`,
+      extra: { audience },
       notice: null,
       requiresSplit: true,
     },
-    ...BLENDED_STAGES,
+    ...scoped,
   ]
 }
 
@@ -421,6 +459,7 @@ const BLENDED_STAGES: RoutingStage[] = (() => {
       label: 'time window only',
       extra: { filters: {}, ignoreSavedFilters: true },
       notice: timeOnlyNotice,
+      lastResort: true,
     },
     {
       // Closest thing to running the saved look over this range: the look's own
@@ -428,6 +467,7 @@ const BLENDED_STAGES: RoutingStage[] = (() => {
       label: 'look fields, time window only, no sorts',
       extra: { filters: {}, ignoreSavedFilters: true, fields: undefined, sorts: [] },
       notice: timeOnlyNotice,
+      lastResort: true,
     },
   ]
 })()
@@ -612,7 +652,9 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
   const token = await login()
   const query = await lookQuery(token)
 
-  const stages = routingStages(await audienceFieldFor(token, query))
+  const cachedAudience = audienceFieldCache
+  const audience = await audienceFieldFor(token, query)
+  let stages = routingStages(audience)
   const attempt = async (stage: RoutingStage) => {
     const csv = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(
       (err: unknown) => (err instanceof Error ? `!${err.message}` : '!failed'),
@@ -631,23 +673,30 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     }
   }
 
-  const [first, ...others] = stages
-  const lead = await attempt(first)
-  // A cached audience field that stopped working should not stick for the container.
-  if (first.requiresSplit && lead.facts.length === 0) audienceFieldCache = null
+  let lead = await attempt(stages[0])
+  // A cached audience field that stopped working would poison every scoped stage, so
+  // re-probe once and rebuild rather than spending the whole cascade on it.
+  if (lead.facts.length === 0 && cachedAudience) {
+    audienceFieldCache = null
+    const reprobed = await audienceFieldFor(token, query)
+    if (reprobed?.field !== audience?.field || reprobed?.group !== audience?.group) {
+      stages = routingStages(reprobed)
+      lead = await attempt(stages[0])
+    }
+  }
   if (lead.facts.length > 0) {
     return {
       start: range.start,
       end: range.end,
       facts: lead.facts,
-      notice: first.notice ?? undefined,
+      notice: stages[0].notice ?? undefined,
       ...allowlistMeta,
     }
   }
 
   // Concurrent so the whole cascade costs one round trip. Run sequentially and the
   // function timeout truncates the diagnosis before the most informative stage.
-  const rest = await Promise.all(others.map(attempt))
+  const rest = await Promise.all(stages.slice(1).map(attempt))
   const winner = rest.find((result) => result.facts.length > 0)
   if (winner) {
     return {
@@ -701,13 +750,14 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
   const barren = (r: Awaited<ReturnType<typeof trio>>) => r.facts.length === 0 && r.dailyFacts.length === 0
 
   const audience = await audienceFieldFor(token, query)
-  let run = await trio({ audienceField: audience ?? undefined })
-  if (audience && barren(run)) {
-    // The cached split stopped working; fall back to blended rather than an empty Playbook.
+  let run = await trio(audience ? { audience } : {})
+  if (audience?.group && barren(run)) {
+    // The split stopped working; keep the audience scoping but stop grouping by it.
     audienceFieldCache = null
-    run = await trio({})
+    run = await trio({ audience: { field: audience.field, group: false } })
   }
-  if (barren(run)) run = await trio({ peakNames: false, audienceField: audience ?? undefined })
+  if (audience && barren(run)) run = await trio({})
+  if (barren(run)) run = await trio({ peakNames: false, audience: audience ?? undefined })
   if (barren(run)) run = await trio({ peakNames: false })
   const { facts, wtdFacts, dailyFacts } = run
   return payloadFromFacts(
