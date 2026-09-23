@@ -11,7 +11,6 @@ import { clampRange } from './routingRange'
 import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
 const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
-const WEEK_FIELD = 'call_data_with_coselling.call_created_at_week'
 const DATE_FIELD = 'call_data_with_coselling.call_created_at_date'
 const REP_NAME_FIELD = 'call_data_with_coselling.mgr_name'
 
@@ -143,14 +142,49 @@ function membershipAgnosticFilters(filters: Record<string, string>): Record<stri
  * dimension the saved look happened to filter on would AND with the window we asked
  * for and silently empty the range.
  */
-function withoutCompetingTimeFilters(filters: Record<string, string>): Record<string, string> {
+function withoutCompetingTimeFilters(
+  filters: Record<string, string>,
+  timeField: string,
+): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(filters)) {
     const field = key.split('.').pop() ?? key
-    if (key !== LOOKER_TIME_FILTER && field.startsWith('call_created_at')) continue
+    if (key !== timeField && field.startsWith('call_created_at')) continue
     out[key] = value
   }
   return out
+}
+
+function isTimeishField(key: string): boolean {
+  return /call_created_at/.test(key.split('.').pop() ?? key)
+}
+
+/**
+ * The look owns which view the call-created dimension lives on. Hardcoding it means a
+ * rename or re-model upstream leaves us filtering on a field the query cannot see,
+ * which Looker answers with a header and no rows rather than an error.
+ */
+function resolveTimeField(query: LookerQuery, projection?: string[]): string {
+  // The projection comes first: a day-grain clone must be windowed by day, not by the
+  // week granularity the saved look happened to select.
+  const groups = [projection ?? [], Object.keys(query.filters ?? {}), query.fields ?? []]
+  for (const group of groups) {
+    const candidates = group.filter(isTimeishField)
+    if (candidates.length === 0) continue
+    const byGrain = (suffix: string) => candidates.find((key) => key.endsWith(suffix))
+    return byGrain('_time') ?? byGrain('_date') ?? byGrain('_week') ?? candidates[0]
+  }
+  return LOOKER_TIME_FILTER
+}
+
+/** The rep-name dimension, never the manager one. `mgr_name` is this model's rep name. */
+function isRepNameField(key: string): boolean {
+  const field = key.split('.').pop() ?? key
+  return /^(rep_name|consultant|sales_rep|mgr_name)$/.test(field)
+}
+
+function resolveRepNameField(query: LookerQuery): string {
+  return (query.fields ?? []).find(isRepNameField) ?? REP_NAME_FIELD
 }
 
 function queryBody(
@@ -158,26 +192,29 @@ function queryBody(
   timeFilter: string,
   extra?: QueryExtra,
 ): Record<string, unknown> {
+  const projection = extra?.fields ?? query.fields
+  const timeField = resolveTimeField(query, projection)
   const filters: Record<string, string> = {
     ...(extra?.ignoreSavedFilters
       ? {}
-      : withoutCompetingTimeFilters(membershipAgnosticFilters(query.filters ?? {}))),
-    [LOOKER_TIME_FILTER]: timeFilter,
+      : withoutCompetingTimeFilters(membershipAgnosticFilters(query.filters ?? {}), timeField)),
+    [timeField]: timeFilter,
     ...membershipAgnosticFilters(extra?.filters ?? {}),
   }
   if (extra?.peakNames === false) {
-    delete filters[REP_NAME_FIELD]
+    for (const key of Object.keys(filters)) {
+      if (isRepNameField(key)) delete filters[key]
+    }
   } else {
-    filters[REP_NAME_FIELD] = lookerRepNameFilter()
+    filters[resolveRepNameField(query)] = lookerRepNameFilter()
   }
-  const fields = extra?.fields ?? query.fields
   return {
     model: query.model,
     view: query.view,
-    fields,
+    fields: projection,
     pivots: query.pivots,
     filters,
-    sorts: selectableSorts(extra?.sorts ?? query.sorts, fields),
+    sorts: selectableSorts(extra?.sorts ?? query.sorts, projection),
     limit: extra?.limit ?? (extra?.peakNames === false ? '10000' : (query.limit ?? '5000')),
     dynamic_fields: query.dynamic_fields,
     query_timezone: query.query_timezone,
@@ -197,8 +234,16 @@ function selectableSorts(sorts: string[] | undefined, fields: string[] | undefin
   return kept.length === sorts.length ? sorts : kept
 }
 
+/** Day grain: swap whichever call-created week dimension the look selected for its date twin. */
 function dailyFields(query: LookerQuery): string[] {
-  return (query.fields ?? []).map((field) => (field === WEEK_FIELD ? DATE_FIELD : field))
+  return (query.fields ?? []).map((field) =>
+    isTimeishField(field) && field.endsWith('_week') ? field.replace(/_week$/, '_date') : field,
+  )
+}
+
+/** The date dimension as it appears in the day-grain projection, for sorting. */
+function dailyDateField(query: LookerQuery): string {
+  return dailyFields(query).find((field) => isTimeishField(field) && field.endsWith('_date')) ?? DATE_FIELD
 }
 
 async function runClosedWeeks(
@@ -228,7 +273,7 @@ async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Pr
   return runQueryCsv(token, query, `${sunday} to ${today}`, {
     fields: dailyFields(query),
     filters: DASHBOARD_7699_FILTERS,
-    sorts: [`${DATE_FIELD} desc`, 'call_data_with_coselling.mgr_name'],
+    sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: extra?.peakNames,
   })
 }
@@ -243,7 +288,7 @@ async function runRoutingRange(
   return runQueryCsv(token, query, `${start} to ${addDays(end, 1)}`, {
     fields: dailyFields(query),
     filters: DASHBOARD_7699_FILTERS,
-    sorts: [`${DATE_FIELD} desc`, REP_NAME_FIELD],
+    sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: false,
     limit: '50000',
     ...extra,
@@ -307,7 +352,7 @@ const ROUTING_STAGES: Array<{ label: string; extra: QueryExtra; notice: string |
 /** First line of the CSV, so an empty range can show what Looker actually replied. */
 function firstLine(csv: string): string {
   const line = csv.trim().split('\n')[0]?.trim() ?? ''
-  return line.length > 160 ? `${line.slice(0, 160)}…` : line
+  return line.length > 400 ? `${line.slice(0, 400)}…` : line
 }
 
 function restrictToHighSchool(facts: LookerFact[]): LookerFact[] {
@@ -526,9 +571,9 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     ...range,
     facts: [],
     empty: true,
-    emptyReason: `No rows for this range. ${attempts.map((a) => a.note).join(' · ')}${
-      header ? ` · Looker's columns were: ${header}` : ''
-    }`,
+    emptyReason: `No rows for this range. ${attempts.map((a) => a.note).join(' · ')} · windowed on ${resolveTimeField(
+      query,
+    )} · rep name ${resolveRepNameField(query)}${header ? ` · Looker's columns were: ${header}` : ''}`,
     ...allowlistMeta,
   }
 }
