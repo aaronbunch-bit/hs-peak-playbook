@@ -216,8 +216,30 @@ function headerLabels(rows: string[][], headerRows: number): string[] {
   return labels
 }
 
-function findCol(labels: string[], test: (label: string) => boolean): number {
-  return labels.findIndex((label) => Boolean(label) && test(label))
+/** The field-name header row on its own, with no pivot group carried onto it. */
+function fieldRowLabels(rows: string[][], headerRows: number): string[] {
+  return (rows[headerRows - 1] ?? []).map((cell) => cell.trim().toLowerCase().replace(/\s+/g, ' '))
+}
+
+function findCol(labels: string[], test: (label: string, index: number) => boolean): number {
+  return labels.findIndex((label, i) => Boolean(label) && test(label, i))
+}
+
+/**
+ * Which columns sit under a pivot value. Looker writes the pivoted field's own name into
+ * the group row above the last dimension, then repeats each pivot value across that
+ * value's measures, so everything from that cell rightwards belongs to the pivot.
+ */
+function pivotedMask(rows: string[][], headerRows: number, width: number): boolean[] {
+  const mask = new Array<boolean>(width).fill(false)
+  if (headerRows < 2) return mask
+  const top = rows[0] ?? []
+  let grouped = false
+  for (let i = 0; i < width; i++) {
+    if ((top[i] ?? '').trim()) grouped = true
+    mask[i] = grouped
+  }
+  return mask
 }
 
 function audienceCols(labels: string[], audience: RegExp) {
@@ -234,9 +256,14 @@ function isAudienceLabel(label: string): boolean {
   return /hs-?\s?stem/.test(label) || /k12|k-12/.test(label)
 }
 
-/** Measures with no audience prefix, i.e. the look reports one blended number per rep. */
-function totalCols(labels: string[]) {
-  const of = (test: (label: string) => boolean) => findCol(labels, (l) => !isAudienceLabel(l) && test(l))
+/**
+ * Measures that belong to no audience, i.e. the look reports one blended number per rep.
+ * A pivoted CSV has none: every measure column sits under some audience, and reading one
+ * of them as the blended total would report a single audience as the whole rep.
+ */
+function totalCols(labels: string[], pivoted: boolean[]) {
+  const of = (test: (label: string) => boolean) =>
+    findCol(labels, (l, i) => !pivoted[i] && !isAudienceLabel(l) && test(l))
   return {
     cc90: of((l) => l.includes('cc90') && !l.includes('mix')),
     impact: of((l) => l.includes('closed client')),
@@ -250,10 +277,10 @@ function totalCols(labels: string[]) {
  * Resolve columns by header text. Looker column order shifts whenever a field is added or
  * renamed upstream, and the fixed layouts below silently parse to zero rows when it does.
  */
-function layoutFromLabels(labels: string[]): Cols | null {
+function layoutFromLabels(labels: string[], fieldLabels: string[], pivoted: boolean[]): Cols | null {
   const hs = audienceCols(labels, /hs-?\s?stem/)
   const k12 = audienceCols(labels, /k12|k-12/)
-  const totals = totalCols(labels)
+  const totals = totalCols(labels, pivoted)
   const week = findCol(labels, (l) => /(^| )(week|date)$/.test(l) || l.includes('created at'))
   // Labels arrive view-prefixed ("Employee Directory Rep Name"), so match the tail.
   const name = findCol(
@@ -276,9 +303,14 @@ function layoutFromLabels(labels: string[]): Cols | null {
     totalPgc: totals.pgc,
     totalCc90: totals.cc90,
     totalImpact: totals.impact,
-    audience: findCol(labels, (l) => l.includes('audience') && !/cc90|pgc|mix|closed|count/.test(l)),
+    // Only ever the field row. Looker writes the pivoted field's own name into the group
+    // row, directly above the last dimension column, so reading the carried-down group
+    // label here mistakes "Rep Manager" for the audience and drops every pivoted row.
+    audience: findCol(fieldLabels, (l) => l.includes('audience') && !/cc90|pgc|mix|closed|count/.test(l)),
   }
   const hasAudience = [hs.cc90, hs.pgc, k12.cc90, k12.pgc].some((col) => col >= 0)
+  // A pivot on audience already gives us the split per column; folding rows would double it.
+  if (hasAudience) layout.audience = -1
   const hasTotals = totals.cc90 >= 0 || totals.pgc >= 0
   if (week < 0 || name < 0 || !(hasAudience || hasTotals)) return null
   return layout
@@ -418,7 +450,11 @@ function nameCol(rows: string[][], fallback: number): number {
 export function parseLookerPlaybook(input: string | string[][]): LookerFact[] {
   const rows = typeof input === 'string' ? parseCsv(input) : input
   const headers = headerRowCount(rows)
-  const byLabel = headers > 0 ? layoutFromLabels(headerLabels(rows, headers)) : null
+  const labels = headers > 0 ? headerLabels(rows, headers) : []
+  const byLabel =
+    headers > 0
+      ? layoutFromLabels(labels, fieldRowLabels(rows, headers), pivotedMask(rows, headers, labels.length))
+      : null
   const start = byLabel ? headers : isPlaybookHeader(rows) ? 2 : 0
   let layout = byLabel
   if (!layout) {

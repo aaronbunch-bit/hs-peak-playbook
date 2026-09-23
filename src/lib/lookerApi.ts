@@ -565,6 +565,26 @@ const BLENDED_STAGES: RoutingStage[] = (() => {
   ]
 })()
 
+/**
+ * The most recent day the explore has any calls at all. Call data loads a day or two
+ * behind, so an empty range is usually just a range Looker has not caught up to yet, and
+ * that is worth saying plainly rather than leaving it to be read out of a field dump.
+ */
+async function latestDayWithVolume(token: string, query: LookerQuery): Promise<string | null> {
+  const date = dailyDateField(query)
+  const csv = await runQueryCsv(token, query, '30 days', {
+    fields: [date],
+    filters: {},
+    ignoreSavedFilters: true,
+    sorts: [`${date} desc`],
+    peakNames: false,
+    plain: true,
+    limit: '1',
+  }).catch(() => '')
+  const cell = csv.trim().split('\n')[1]?.split(',')[0]?.trim()
+  return cell && /^\d{4}-\d{2}-\d{2}$/.test(cell) ? cell : null
+}
+
 /** First line of the CSV, so an empty range can show what Looker actually replied. */
 function firstLine(csv: string): string {
   const line = csv.trim().split('\n')[0]?.trim() ?? ''
@@ -804,11 +824,17 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
 
   const attempts = [lead, ...rest]
   const header = attempts.map((a) => a.header).find((line) => line.length > 0)
+  const latest = await latestDayWithVolume(token, query)
+  const asked = range.start === range.end ? range.start : `${range.start} to ${range.end}`
+  const headline =
+    latest && latest < range.start
+      ? `Looker has no call data for ${asked} yet — its most recent day with calls is ${latest}. Pick a range ending on or before ${latest}.`
+      : 'No rows for this range.'
   return {
     ...range,
     facts: [],
     empty: true,
-    emptyReason: `No rows for this range. ${attempts.map((a) => a.note).join(' · ')} · windowed on ${resolveTimeField(
+    emptyReason: `${headline} ${attempts.map((a) => a.note).join(' · ')} · windowed on ${resolveTimeField(
       query,
       dailyFields(query),
     )} · rep name ${resolveRepNameField(query)} · look ${lookId()} selects [${(query.fields ?? []).join(
