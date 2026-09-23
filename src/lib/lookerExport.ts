@@ -137,6 +137,8 @@ type Cols = {
   /** Un-pivoted CC90 / Closed Clients, when the look no longer splits by audience. */
   totalCc90: number
   totalImpact: number
+  /** Audience as a row dimension rather than a pivot: one row per rep x audience. */
+  audience: number
 }
 
 const VIS_COLS: Cols = {
@@ -155,6 +157,7 @@ const VIS_COLS: Cols = {
   totalPgc: 10,
   totalCc90: -1,
   totalImpact: -1,
+  audience: -1,
 }
 
 /** Raw query CSV includes Closed Client Count (sold) between CC90 and pGC for each audience. */
@@ -174,6 +177,7 @@ const RAW_COLS: Cols = {
   totalPgc: 12,
   totalCc90: -1,
   totalImpact: -1,
+  audience: -1,
 }
 
 function layoutFromHeader(rows: string[][]): Cols {
@@ -272,11 +276,92 @@ function layoutFromLabels(labels: string[]): Cols | null {
     totalPgc: totals.pgc,
     totalCc90: totals.cc90,
     totalImpact: totals.impact,
+    audience: findCol(labels, (l) => l.includes('audience') && !/cc90|pgc|mix|closed|count/.test(l)),
   }
   const hasAudience = [hs.cc90, hs.pgc, k12.cc90, k12.pgc].some((col) => col >= 0)
   const hasTotals = totals.cc90 >= 0 || totals.pgc >= 0
   if (week < 0 || name < 0 || !(hasAudience || hasTotals)) return null
   return layout
+}
+
+const HS_AUDIENCE = /hs-?\s?stem/i
+const K12_AUDIENCE = /k12|k-12/i
+
+/**
+ * Audience arrives as a dimension, so each rep has one row per audience. Fold those back
+ * into the single rep-week fact the rest of the app expects.
+ */
+function factsFromAudienceRows(rows: string[][], layout: Cols): LookerFact[] {
+  type Acc = {
+    week: string
+    name: string
+    superGroup: string | null
+    manager: string | null
+    hsCc90: number
+    hsSold: number
+    hsImpact: number
+    k12Cc90: number
+    k12Sold: number
+    k12Impact: number
+  }
+  const byKey = new Map<string, Acc>()
+  for (const cols of rows) {
+    const week = (cols[layout.week] ?? '').trim().slice(0, 10)
+    const name = (cols[layout.name] ?? '').trim()
+    if (!week || !name || !/^\d{4}-\d{2}-\d{2}$/.test(week)) continue
+    const audience = (cols[layout.audience] ?? '').trim()
+    const isHs = HS_AUDIENCE.test(audience)
+    const isK12 = !isHs && K12_AUDIENCE.test(audience)
+    if (!isHs && !isK12) continue
+    const cc90 = layout.totalCc90 >= 0 ? parseCount(cols[layout.totalCc90] ?? '') : 0
+    const pgc = parsePgc(cols[layout.totalPgc] ?? '')
+    const impact = layout.totalImpact >= 0 ? parseCount(cols[layout.totalImpact] ?? '') : impliedImpact(pgc, cc90)
+    const sold = impact > 0 ? impact : (pgc ?? 0) * cc90
+    const key = `${week}|${name.toLowerCase()}`
+    let acc = byKey.get(key)
+    if (!acc) {
+      acc = {
+        week,
+        name,
+        superGroup: (cols[layout.superGroup] ?? '').trim() || null,
+        manager: canonicalManager((cols[layout.manager] ?? '').trim() || null),
+        hsCc90: 0,
+        hsSold: 0,
+        hsImpact: 0,
+        k12Cc90: 0,
+        k12Sold: 0,
+        k12Impact: 0,
+      }
+      byKey.set(key, acc)
+    }
+    if (isHs) {
+      acc.hsCc90 += cc90
+      acc.hsSold += sold
+      acc.hsImpact += impact
+    } else {
+      acc.k12Cc90 += cc90
+      acc.k12Sold += sold
+      acc.k12Impact += impact
+    }
+  }
+  return [...byKey.values()].map((a) => {
+    const cc90 = a.hsCc90 + a.k12Cc90
+    return {
+      week: a.week,
+      superGroup: a.superGroup,
+      name: a.name,
+      manager: a.manager,
+      hsCc90: a.hsCc90,
+      hsPgc: a.hsCc90 > 0 ? round4(a.hsSold / a.hsCc90) : null,
+      hsMix: cc90 > 0 ? round4(a.hsCc90 / cc90) : null,
+      hsImpact: a.hsImpact,
+      k12Cc90: a.k12Cc90,
+      k12Pgc: a.k12Cc90 > 0 ? round4(a.k12Sold / a.k12Cc90) : null,
+      k12Mix: cc90 > 0 ? round4(a.k12Cc90 / cc90) : null,
+      k12Impact: a.k12Impact,
+      totalPgc: cc90 > 0 ? round4((a.hsSold + a.k12Sold) / cc90) : null,
+    }
+  })
 }
 
 function impactCount(raw: string | undefined, pgc: number | null, cc90: number, col: number): number {
@@ -333,6 +418,7 @@ export function parseLookerPlaybook(input: string | string[][]): LookerFact[] {
     layout = { ...layoutFromHeader(rows) }
     layout.name = nameCol(rows, layout.name)
   }
+  if (layout.audience >= 0) return factsFromAudienceRows(rows.slice(start), layout)
   const out: LookerFact[] = []
   for (const cols of rows.slice(start)) {
     const fact = rowToFact(cols, layout)
