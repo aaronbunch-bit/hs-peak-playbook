@@ -134,6 +134,9 @@ type Cols = {
   k12Pgc: number
   k12Mix: number
   totalPgc: number
+  /** Un-pivoted CC90 / Closed Clients, when the look no longer splits by audience. */
+  totalCc90: number
+  totalImpact: number
 }
 
 const VIS_COLS: Cols = {
@@ -150,6 +153,8 @@ const VIS_COLS: Cols = {
   k12Pgc: 8,
   k12Mix: 9,
   totalPgc: 10,
+  totalCc90: -1,
+  totalImpact: -1,
 }
 
 /** Raw query CSV includes Closed Client Count (sold) between CC90 and pGC for each audience. */
@@ -167,6 +172,8 @@ const RAW_COLS: Cols = {
   k12Pgc: 10,
   k12Mix: 11,
   totalPgc: 12,
+  totalCc90: -1,
+  totalImpact: -1,
 }
 
 function layoutFromHeader(rows: string[][]): Cols {
@@ -219,6 +226,22 @@ function audienceCols(labels: string[], audience: RegExp) {
   }
 }
 
+function isAudienceLabel(label: string): boolean {
+  return /hs-?\s?stem/.test(label) || /k12|k-12/.test(label)
+}
+
+/** Measures with no audience prefix, i.e. the look reports one blended number per rep. */
+function totalCols(labels: string[]) {
+  const of = (test: (label: string) => boolean) => findCol(labels, (l) => !isAudienceLabel(l) && test(l))
+  return {
+    cc90: of((l) => l.includes('cc90') && !l.includes('mix')),
+    impact: of((l) => l.includes('closed client')),
+    pgc: findCol(labels, (l) => l.includes('total pgc')) >= 0
+      ? findCol(labels, (l) => l.includes('total pgc'))
+      : of((l) => l.includes('pgc') && !l.includes('mix')),
+  }
+}
+
 /**
  * Resolve columns by header text. Looker column order shifts whenever a field is added or
  * renamed upstream, and the fixed layouts below silently parse to zero rows when it does.
@@ -226,10 +249,12 @@ function audienceCols(labels: string[], audience: RegExp) {
 function layoutFromLabels(labels: string[]): Cols | null {
   const hs = audienceCols(labels, /hs-?\s?stem/)
   const k12 = audienceCols(labels, /k12|k-12/)
+  const totals = totalCols(labels)
   const week = findCol(labels, (l) => /(^| )(week|date)$/.test(l) || l.includes('created at'))
+  // Labels arrive view-prefixed ("Employee Directory Rep Name"), so match the tail.
   const name = findCol(
     labels,
-    (l) => !l.includes('manager') && /^(consultant|rep name|sales rep|name)$/.test(l),
+    (l) => !l.includes('manager') && /(^| )(consultant|rep name|sales rep|name)$/.test(l),
   )
   const layout: Cols = {
     week,
@@ -244,10 +269,13 @@ function layoutFromLabels(labels: string[]): Cols | null {
     k12Impact: k12.impact,
     k12Pgc: k12.pgc,
     k12Mix: k12.mix,
-    totalPgc: findCol(labels, (l) => l.includes('total pgc')),
+    totalPgc: totals.pgc,
+    totalCc90: totals.cc90,
+    totalImpact: totals.impact,
   }
   const hasAudience = [hs.cc90, hs.pgc, k12.cc90, k12.pgc].some((col) => col >= 0)
-  if (week < 0 || name < 0 || !hasAudience) return null
+  const hasTotals = totals.cc90 >= 0 || totals.pgc >= 0
+  if (week < 0 || name < 0 || !(hasAudience || hasTotals)) return null
   return layout
 }
 
@@ -265,6 +293,9 @@ function rowToFact(cols: string[], layout: Cols): LookerFact | null {
   const k12Pgc = parsePgc(cols[layout.k12Pgc] ?? '')
   const hsCc90 = parseCount(cols[layout.hsCc90] ?? '')
   const k12Cc90 = parseCount(cols[layout.k12Cc90] ?? '')
+  const totalCc90 = layout.totalCc90 >= 0 ? parseCount(cols[layout.totalCc90] ?? '') : null
+  const totalImpact = layout.totalImpact >= 0 ? parseCount(cols[layout.totalImpact] ?? '') : null
+  const totalPgc = parsePgc(cols[layout.totalPgc] ?? '')
   return {
     week,
     superGroup: (cols[layout.superGroup] ?? '').trim() || null,
@@ -278,13 +309,15 @@ function rowToFact(cols: string[], layout: Cols): LookerFact | null {
     k12Pgc,
     k12Mix: parsePgc(cols[layout.k12Mix] ?? ''),
     k12Impact: impactCount(cols[layout.k12Impact], k12Pgc, k12Cc90, layout.k12Impact),
-    totalPgc: parsePgc(cols[layout.totalPgc] ?? ''),
+    totalPgc: totalPgc ?? (totalCc90 && totalImpact != null ? round4(totalImpact / totalCc90) : null),
+    ...(totalCc90 != null ? { totalCc90 } : {}),
+    ...(totalImpact != null ? { totalImpact } : {}),
   }
 }
 
 function nameCol(rows: string[][], fallback: number): number {
   for (const header of rows.slice(0, 2)) {
-    const i = header.findIndex((h) => /^(consultant|rep name)$/i.test(h.trim()))
+    const i = header.findIndex((h) => /(^| )(consultant|rep name)$/i.test(h.trim()))
     if (i >= 0) return i
   }
   return fallback
@@ -322,6 +355,14 @@ export function projectFact(
   const k12Impact = impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
   if (slice === 'hs-stem') return { pgc: fact.hsPgc, cc90: fact.hsCc90, mix: fact.hsMix, impact: hsImpact }
   if (slice === 'k12tp') return { pgc: fact.k12Pgc, cc90: fact.k12Cc90, mix: fact.k12Mix, impact: k12Impact }
+  if (fact.totalCc90 != null) {
+    return {
+      pgc: fact.totalPgc,
+      cc90: fact.totalCc90,
+      mix: fact.hsMix,
+      impact: impliedImpact(fact.totalPgc, fact.totalCc90, fact.totalImpact),
+    }
+  }
   return { pgc: fact.totalPgc, cc90: fact.hsCc90 + fact.k12Cc90, mix: fact.hsMix, impact: hsImpact + k12Impact }
 }
 

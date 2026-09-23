@@ -39,6 +39,9 @@ export type LookerFact = {
   k12Mix: number | null
   k12Impact?: number
   totalPgc: number | null
+  /** Set instead of the audience pair when the look reports one blended number per rep. */
+  totalCc90?: number
+  totalImpact?: number
 }
 
 export type WeeklyRow = {
@@ -91,6 +94,9 @@ export type RoutingFact = {
   k12Pgc: number | null
   k12Impact: number
   totalPgc: number | null
+  /** Set instead of the audience pair when the look reports one blended number per rep. */
+  totalCc90?: number
+  totalImpact?: number
 }
 
 export type RoutingRangePayload = {

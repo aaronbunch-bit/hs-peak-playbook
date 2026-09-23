@@ -33,10 +33,13 @@ export type RoutingGroupStats = {
   n: number
 }
 
-function hasHsK12Volume(fact: Pick<LookerFact, 'hsCc90' | 'k12Cc90' | 'hsPgc' | 'k12Pgc' | 'totalPgc'>): boolean {
+function hasHsK12Volume(
+  fact: Pick<LookerFact, 'hsCc90' | 'k12Cc90' | 'hsPgc' | 'k12Pgc' | 'totalPgc' | 'totalCc90'>,
+): boolean {
   return (
     fact.hsCc90 > 0 ||
     fact.k12Cc90 > 0 ||
+    (fact.totalCc90 ?? 0) > 0 ||
     fact.hsPgc != null ||
     fact.k12Pgc != null ||
     fact.totalPgc != null
@@ -55,6 +58,10 @@ export function factsToRouting(facts: LookerFact[], allowlist: OverflowAllowlist
     k12Sold: number
     k12Impact: number
     k12Cc90: number
+    /** Null until a fact carries un-pivoted totals, so audience-split looks are untouched. */
+    totalSold: number | null
+    totalImpact: number
+    totalCc90: number
     date: string
   }
   const byName = new Map<string, Acc>()
@@ -72,6 +79,9 @@ export function factsToRouting(facts: LookerFact[], allowlist: OverflowAllowlist
     const k12Sold = (fact.k12Pgc ?? 0) * fact.k12Cc90
     const hsImpact = impliedImpact(fact.hsPgc, fact.hsCc90, fact.hsImpact)
     const k12Impact = impliedImpact(fact.k12Pgc, fact.k12Cc90, fact.k12Impact)
+    const totalCc90 = fact.totalCc90 ?? 0
+    const totalImpact = fact.totalCc90 == null ? 0 : impliedImpact(fact.totalPgc, totalCc90, fact.totalImpact)
+    const totalSold = fact.totalCc90 == null ? null : (fact.totalPgc ?? 0) * totalCc90
     const prev = byName.get(key)
     if (!prev) {
       byName.set(key, {
@@ -85,6 +95,9 @@ export function factsToRouting(facts: LookerFact[], allowlist: OverflowAllowlist
         k12Sold,
         k12Impact,
         k12Cc90: fact.k12Cc90,
+        totalSold,
+        totalImpact,
+        totalCc90,
         date: fact.week,
       })
       continue
@@ -95,25 +108,38 @@ export function factsToRouting(facts: LookerFact[], allowlist: OverflowAllowlist
     prev.k12Sold += k12Sold
     prev.k12Impact += k12Impact
     prev.k12Cc90 += fact.k12Cc90
+    if (totalSold != null) prev.totalSold = (prev.totalSold ?? 0) + totalSold
+    prev.totalImpact += totalImpact
+    prev.totalCc90 += totalCc90
     prev.manager = fact.manager
     prev.dedicatedHs = chips.dedicatedHs
     prev.dedicatedK12 = chips.dedicatedK12
     prev.date = fact.week
   }
-  return [...byName.values()].map((row) => ({
-    date: row.date,
-    name: row.name,
-    manager: row.manager,
-    dedicatedHs: row.dedicatedHs,
-    dedicatedK12: row.dedicatedK12,
-    hsCc90: row.hsCc90,
-    hsPgc: row.hsCc90 > 0 ? row.hsSold / row.hsCc90 : null,
-    hsImpact: row.hsImpact,
-    k12Cc90: row.k12Cc90,
-    k12Pgc: row.k12Cc90 > 0 ? row.k12Sold / row.k12Cc90 : null,
-    k12Impact: row.k12Impact,
-    totalPgc: row.hsCc90 + row.k12Cc90 > 0 ? (row.hsSold + row.k12Sold) / (row.hsCc90 + row.k12Cc90) : null,
-  }))
+  return [...byName.values()].map((row) => {
+    const unpivoted = row.totalSold != null
+    return {
+      date: row.date,
+      name: row.name,
+      manager: row.manager,
+      dedicatedHs: row.dedicatedHs,
+      dedicatedK12: row.dedicatedK12,
+      hsCc90: row.hsCc90,
+      hsPgc: row.hsCc90 > 0 ? row.hsSold / row.hsCc90 : null,
+      hsImpact: row.hsImpact,
+      k12Cc90: row.k12Cc90,
+      k12Pgc: row.k12Cc90 > 0 ? row.k12Sold / row.k12Cc90 : null,
+      k12Impact: row.k12Impact,
+      totalPgc: unpivoted
+        ? row.totalCc90 > 0
+          ? (row.totalSold ?? 0) / row.totalCc90
+          : null
+        : row.hsCc90 + row.k12Cc90 > 0
+          ? (row.hsSold + row.k12Sold) / (row.hsCc90 + row.k12Cc90)
+          : null,
+      ...(unpivoted ? { totalCc90: row.totalCc90, totalImpact: row.totalImpact } : {}),
+    }
+  })
 }
 
 function audienceVolume(
@@ -131,6 +157,12 @@ function audienceVolume(
     const closedClients = fact.k12Impact
     const sold = closedClients > 0 ? closedClients : (fact.k12Pgc ?? 0) * cc90
     return { sold, cc90, pgc: fact.k12Pgc ?? (cc90 > 0 ? sold / cc90 : null) }
+  }
+  if (fact.totalCc90 != null) {
+    const cc90 = fact.totalCc90
+    const closedClients = fact.totalImpact ?? 0
+    const sold = closedClients > 0 ? closedClients : (fact.totalPgc ?? 0) * cc90
+    return { sold, cc90, pgc: fact.totalPgc ?? (cc90 > 0 ? sold / cc90 : null) }
   }
   const cc90 = fact.hsCc90 + fact.k12Cc90
   const closedClients = fact.hsImpact + fact.k12Impact
