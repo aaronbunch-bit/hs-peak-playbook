@@ -10,16 +10,35 @@ import { factsToRouting } from './routing'
 import { clampRange } from './routingRange'
 import type { DailyRow, IntradayPayload, LookerFact, PacerPayload, RoutingRangePayload, Slice, Staffing } from './types'
 
-const LOOKER_TIME_FILTER = 'call_data_with_coselling.call_created_at_time'
-const DATE_FIELD = 'call_data_with_coselling.call_created_at_date'
-const REP_NAME_FIELD = 'call_data_with_coselling.mgr_name'
+/**
+ * The app has to agree with the dashboard the team reads, so it queries that dashboard's
+ * own explore instead of cloning a saved look:
+ * sales::call_duration_per_rep_by_supergroup -> sales / gld_sales_manager_funnel.
+ *
+ * Look 26564 sits on decompositions/call_data_with_coselling, which is a different model
+ * that loads roughly a day behind and reports slightly different CC90 counts, so
+ * yesterday is always empty there while the dashboard shows a full day. It stays as the
+ * fallback for when this explore cannot be read.
+ */
+const SOURCE_MODEL = 'sales'
+const SOURCE_EXPLORE = 'gld_sales_manager_funnel'
 
-/** Dashboard 7699 defaults that the DoD clone should match. */
-const DASHBOARD_7699_FILTERS: Record<string, string> = {
-  'call_data_with_coselling.business': 'International,VT Core',
-  'call_data_with_coselling.expert_type': '-Dropped Expert',
-  'call_data_with_coselling.consultant_cc90': 'Yes',
-}
+const LOOKER_TIME_FILTER = `${SOURCE_EXPLORE}.started_time`
+const DATE_FIELD = `${SOURCE_EXPLORE}.started_date`
+const REP_NAME_FIELD = `${SOURCE_EXPLORE}.mgr_name`
+
+/**
+ * The dashboard's own filter defaults. The field behind each one is named differently per
+ * explore -- the cc90 flag is `is_cc90` here and `consultant_cc90` on the look's model --
+ * so they are resolved against whichever explore is answering.
+ */
+const DASHBOARD_FILTERS = [
+  { label: 'Business', names: ['business'], value: 'International,VT Core' },
+  { label: 'Expert Type', names: ['expert_type'], value: '-Dropped Expert' },
+  { label: 'Consultant cc90', names: ['is_cc90', 'consultant_cc90'], value: 'Yes' },
+] as const
+
+type DashboardFilter = { label: string; field: string }
 
 type LookerQuery = {
   model?: string
@@ -101,6 +120,48 @@ async function lookQuery(token: string): Promise<LookerQuery> {
   return lookQueryFor(token, lookId())
 }
 
+/**
+ * The dashboard's explore, described directly. Nothing here is cloned from a saved look,
+ * so no pivot, table calculation or presentation choice of someone else's can travel into
+ * a re-windowed query. A field that is renamed upstream fails the probe below loudly
+ * instead of returning an empty range.
+ */
+function exploreQuery(): LookerQuery {
+  const v = `${SOURCE_EXPLORE}.`
+  return {
+    model: SOURCE_MODEL,
+    view: SOURCE_EXPLORE,
+    fields: [
+      `${v}started_week`,
+      `${v}cc90_count`,
+      `${v}closed_client_count_this_call`,
+      `${v}mgr_name`,
+      `${v}supervisor`,
+      `${v}audience_subject`,
+    ],
+    // Replaced by every clone; it is here so the time grain is discoverable.
+    filters: { [`${v}started_time`]: CLOSED_WEEKS_FILTER },
+    limit: '5000',
+  }
+}
+
+/** The dashboard explore if it answers, otherwise the saved look. */
+async function sourceQuery(token: string): Promise<LookerQuery> {
+  const preferred = exploreQuery()
+  await discoverExplore(token, preferred)
+  const answers = await runQueryCsv(token, preferred, CLOSED_WEEKS_FILTER, {
+    peakNames: false,
+    plain: true,
+    limit: '1',
+  })
+    .then((run) => run.csv.trim().length > 0)
+    .catch(() => false)
+  if (answers) return preferred
+  const fallback = await lookQuery(token)
+  await discoverExplore(token, fallback)
+  return fallback
+}
+
 type QueryExtra = {
   fields?: string[]
   filters?: Record<string, string>
@@ -115,19 +176,22 @@ type QueryExtra = {
   plain?: boolean
 }
 
+/** The CSV plus the projection behind it, so the parser never has to guess its columns. */
+type QueryRun = { csv: string; fields: string[] }
+
 async function runQueryCsv(
   token: string,
   query: LookerQuery,
   timeFilter: string,
   extra?: QueryExtra,
-): Promise<string> {
+): Promise<QueryRun> {
   const res = await lookerFetch(token, '/queries/run/csv', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(queryBody(query, timeFilter, extra)),
   })
   if (!res.ok) throw new Error(`Looker query failed (${res.status})`)
-  return res.text()
+  return { csv: await res.text(), fields: csvColumnOrder(query, projectionFor(query, extra)) ?? [] }
 }
 
 /** Roster is the Rep Name list. Looker manager / work-group fields lag HR. */
@@ -152,15 +216,19 @@ function withoutCompetingTimeFilters(
 ): Record<string, string> {
   const out: Record<string, string> = {}
   for (const [key, value] of Object.entries(filters)) {
-    const field = key.split('.').pop() ?? key
-    if (key !== timeField && field.startsWith('call_created_at')) continue
+    if (key !== timeField && isTimeishField(key)) continue
     out[key] = value
   }
   return out
 }
 
+/**
+ * A call-date dimension at some granularity. Anchored, so a neighbouring timestamp like
+ * `bot_started_time` is never mistaken for the one the report is dated by.
+ */
 function isTimeishField(key: string): boolean {
-  return /call_created_at/.test(key.split('.').pop() ?? key)
+  const field = key.split('.').pop() ?? key
+  return /^(started|call_created_at|created_at)_(time|date|week|month)$/.test(field)
 }
 
 /**
@@ -215,7 +283,21 @@ function resolveRepNameField(query: LookerQuery): string {
 
 type ExploreField = { name: string; label: string }
 
-let exploreCache: { key: string; dims: ExploreField[]; at: number } | null = null
+let exploreCache: { key: string; dims: ExploreField[]; measures: string[]; at: number } | null = null
+
+/**
+ * The order Looker actually returns columns in: every dimension first, then every measure,
+ * each in the order it was requested. The projection order is not the CSV order, and
+ * reading columns in the order we asked for them silently shifts the whole row.
+ * Null when the explore could not be read, since then we cannot tell the two apart.
+ */
+function csvColumnOrder(query: LookerQuery, projection: string[] | undefined): string[] | null {
+  if (!projection?.length) return null
+  const cache = exploreCache?.key === exploreKey(query) ? exploreCache : null
+  if (!cache || (cache.dims.length === 0 && cache.measures.length === 0)) return null
+  const measures = new Set(cache.measures)
+  return [...projection.filter((f) => !measures.has(f)), ...projection.filter((f) => measures.has(f))]
+}
 
 /** Day grain: swap whichever call-created week dimension the look selected for its date twin. */
 function dailyFields(query: LookerQuery): string[] {
@@ -259,8 +341,9 @@ async function discoverExplore(token: string, query: LookerQuery): Promise<void>
     `/lookml_models/${encodeURIComponent(query.model)}/explores/${encodeURIComponent(query.view)}`,
   ).catch(() => null)
   if (!res?.ok) return
+  type Field = { name?: string; label?: string; label_short?: string; hidden?: boolean }
   const data = (await res.json().catch(() => null)) as {
-    fields?: { dimensions?: Array<{ name?: string; label?: string; label_short?: string; hidden?: boolean }> }
+    fields?: { dimensions?: Field[]; measures?: Field[] }
   } | null
   const dims = (data?.fields?.dimensions ?? [])
     .filter((d) => d.name && !d.hidden)
@@ -268,7 +351,18 @@ async function discoverExplore(token: string, query: LookerQuery): Promise<void>
       name: d.name as string,
       label: (d.label ?? d.label_short ?? '').trim().toLowerCase().replace(/\s+/g, ' '),
     }))
-  exploreCache = { key, dims, at: Date.now() }
+  // Measures are kept only to tell them apart from dimensions when reading the CSV, so
+  // hidden ones count too: selecting one still puts a column after every dimension.
+  const measures = (data?.fields?.measures ?? []).map((m) => m.name).filter((n): n is string => Boolean(n))
+  exploreCache = { key, dims, measures, at: Date.now() }
+}
+
+/** The exact field list a clone selects, shared so the parser can be told the columns. */
+function projectionFor(query: LookerQuery, extra?: QueryExtra): string[] | undefined {
+  // An empty list is not the same as "no opinion": Looker rejects a query selecting nothing.
+  const base = (extra?.fields ?? query.fields)?.length ? (extra?.fields ?? query.fields) : undefined
+  const audience = extra?.audience
+  return audience?.group && base && !base.includes(audience.field) ? [...base, audience.field] : base
 }
 
 function queryBody(
@@ -276,11 +370,8 @@ function queryBody(
   timeFilter: string,
   extra?: QueryExtra,
 ): Record<string, unknown> {
-  // An empty list is not the same as "no opinion": Looker rejects a query selecting nothing.
-  const base = (extra?.fields ?? query.fields)?.length ? (extra?.fields ?? query.fields) : undefined
   const audience = extra?.audience
-  const projection =
-    audience?.group && base && !base.includes(audience.field) ? [...base, audience.field] : base
+  const projection = projectionFor(query, extra)
   const timeField = resolveTimeField(query, projection)
   const filters: Record<string, string> = {
     ...(extra?.ignoreSavedFilters
@@ -376,14 +467,14 @@ async function audienceFieldFor(token: string, query: LookerQuery): Promise<Audi
   const candidates = audienceCandidates(query)
   const probes = await Promise.all(
     candidates.map(async (field) => {
-      const csv = await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, {
+      const run = await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, {
         audience: { field, group: true },
         peakNames: false,
         plain: true,
         limit: '1',
-      }).catch(() => '')
-      const facts = parseLookerPlaybook(csv)
-      return { field, exists: csv.trim().length > 0, splits: facts.some((fact) => fact.totalCc90 == null) }
+      }).catch(() => ({ csv: '', fields: [] }))
+      const facts = parseLookerPlaybook(run.csv, run.fields)
+      return { field, exists: run.csv.trim().length > 0, splits: facts.some((fact) => fact.totalCc90 == null) }
     }),
   )
   const best = probes.find((p) => p.splits) ?? probes.find((p) => p.exists)
@@ -399,34 +490,33 @@ async function runClosedWeeks(
   token: string,
   query: LookerQuery,
   extra?: QueryExtra,
-): Promise<{ csv: string; savedLook: boolean }> {
+): Promise<QueryRun & { savedLook: boolean }> {
   try {
-    return {
-      csv: await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, { plain: true, ...extra }),
-      savedLook: false,
-    }
+    const run = await runQueryCsv(token, query, CLOSED_WEEKS_FILTER, { plain: true, ...extra })
+    return { ...run, savedLook: false }
   } catch {
-    return { csv: await runSavedLook(token), savedLook: true }
+    // The saved look's own layout, so its columns have to be read from its labels.
+    return { csv: await runSavedLook(token), fields: [], savedLook: true }
   }
 }
 
-async function runWtd(token: string, query: LookerQuery, extra?: QueryExtra): Promise<string> {
+async function runWtd(token: string, query: LookerQuery, extra?: QueryExtra): Promise<QueryRun> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
   return runQueryCsv(token, query, `${sunday} to ${today}`, {
-    filters: DASHBOARD_7699_FILTERS,
+    filters: dashboardFilters(query),
     peakNames: extra?.peakNames,
     audience: extra?.audience,
     plain: true,
   })
 }
 
-async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Promise<string> {
+async function runDod(token: string, query: LookerQuery, extra?: QueryExtra): Promise<QueryRun> {
   const today = toIsoDate(new Date())
   const sunday = sundayWeekStart()
   return runQueryCsv(token, query, `${sunday} to ${today}`, {
     fields: dailyFields(query),
-    filters: DASHBOARD_7699_FILTERS,
+    filters: dashboardFilters(query),
     sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: extra?.peakNames,
     audience: extra?.audience,
@@ -440,10 +530,10 @@ async function runRoutingRange(
   start: string,
   end: string,
   extra?: QueryExtra,
-): Promise<string> {
+): Promise<QueryRun> {
   return runQueryCsv(token, query, `${start} to ${addDays(end, 1)}`, {
     fields: dailyFields(query),
-    filters: DASHBOARD_7699_FILTERS,
+    filters: dashboardFilters(query),
     sorts: [`${dailyDateField(query)} desc`, resolveRepNameField(query)],
     peakNames: false,
     plain: true,
@@ -452,23 +542,34 @@ async function runRoutingRange(
   })
 }
 
-const FILTER_LABELS: Record<string, string> = {
-  'call_data_with_coselling.consultant_cc90': 'Consultant cc90',
-  'call_data_with_coselling.expert_type': 'Expert Type',
-  'call_data_with_coselling.business': 'Business',
-}
-
-function without(keys: string[]): Record<string, string> {
-  const out = { ...DASHBOARD_7699_FILTERS }
-  for (const key of keys) delete out[key]
+/** The dashboard's filters as this explore names them, dropping any it does not have. */
+function dashboardFilterFields(query: LookerQuery): DashboardFilter[] {
+  const dims = discoveredDimensions(query)
+  const out: DashboardFilter[] = []
+  for (const spec of DASHBOARD_FILTERS) {
+    const found = spec.names
+      .map((name) => dims.find((d) => (d.name.split('.').pop() ?? '') === name)?.name)
+      .find((name) => name != null)
+    // Before the explore has been read, assume the field sits on the query's own view.
+    const field = found ?? (query.view ? `${query.view}.${spec.names[0]}` : null)
+    if (field) out.push({ label: spec.label, field })
+  }
   return out
 }
 
-function droppedNotice(keys: string[], timeOnly = false): string {
-  const names = keys.map((key) => FILTER_LABELS[key] ?? key).join(', ')
-  const scope = timeOnly ? `${names}, and the saved look’s own filters` : names
+function dashboardFilters(query: LookerQuery): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const { label, field } of dashboardFilterFields(query)) {
+    out[field] = DASHBOARD_FILTERS.find((s) => s.label === label)!.value
+  }
+  return out
+}
+
+function droppedNotice(labels: string[], timeOnly = false): string {
+  const names = labels.join(', ')
+  const scope = timeOnly ? `${names}, and the source’s own filters` : names
   return `Heads up: ${scope} matched no rows for this range, so these numbers ignore ${
-    keys.length > 1 || timeOnly ? 'them' : 'it'
+    labels.length > 1 || timeOnly ? 'them' : 'it'
   } and will read wider than the Looker dashboard.`
 }
 
@@ -499,7 +600,7 @@ const BARE_NOTICE =
  * stages below are the fallback for a look or explore with no audience dimension.
  */
 function routingStages(query: LookerQuery, audience: AudienceUse | null): RoutingStage[] {
-  const blended = [...BLENDED_STAGES, bareStage(query)]
+  const blended = [...blendedStages(query), bareStage(query)]
   if (!audience) return blended
   // Even without a split the filter belongs on every fallback, so the blended number
   // stays scoped to the two audiences rather than counting the whole business. The bare
@@ -535,18 +636,28 @@ function bareStage(query: LookerQuery): RoutingStage {
   }
 }
 
-const BLENDED_STAGES: RoutingStage[] = (() => {
-  const cc90 = 'call_data_with_coselling.consultant_cc90'
-  const expert = 'call_data_with_coselling.expert_type'
-  const business = 'call_data_with_coselling.business'
-  const drops = [[cc90], [expert], [business], [cc90, expert, business]]
-  const timeOnlyNotice = droppedNotice([cc90, expert, business], true)
+function blendedStages(query: LookerQuery): RoutingStage[] {
+  const all = dashboardFilterFields(query)
+  const filters = dashboardFilters(query)
+  const pick = (label: string) => all.filter((f) => f.label === label)
+  const drops = [pick('Consultant cc90'), pick('Expert Type'), pick('Business'), all].filter(
+    (keys) => keys.length > 0,
+  )
+  const without = (keys: DashboardFilter[]) => {
+    const out = { ...filters }
+    for (const { field } of keys) delete out[field]
+    return out
+  }
+  const timeOnlyNotice = droppedNotice(
+    all.map((f) => f.label),
+    true,
+  )
   return [
-    { label: 'dashboard 7699 filters', extra: {}, notice: NO_AUDIENCE_NOTICE },
+    { label: 'dashboard filters', extra: { filters }, notice: NO_AUDIENCE_NOTICE },
     ...drops.map((keys) => ({
-      label: `without ${keys.map((key) => FILTER_LABELS[key] ?? key).join(' / ')}`,
+      label: `without ${keys.map((k) => k.label).join(' / ')}`,
       extra: { filters: without(keys) },
-      notice: droppedNotice(keys),
+      notice: droppedNotice(keys.map((k) => k.label)),
     })),
     {
       label: 'time window only',
@@ -555,15 +666,15 @@ const BLENDED_STAGES: RoutingStage[] = (() => {
       lastResort: true,
     },
     {
-      // Closest thing to running the saved look over this range: the look's own
-      // projection, no sorts of ours, nothing but the date window.
-      label: 'look fields, time window only, no sorts',
+      // Closest thing to the source's own query over this range: its own projection, no
+      // sorts of ours, nothing but the date window.
+      label: 'source fields, time window only, no sorts',
       extra: { filters: {}, ignoreSavedFilters: true, fields: undefined, sorts: [] },
       notice: timeOnlyNotice,
       lastResort: true,
     },
   ]
-})()
+}
 
 /**
  * The most recent day the explore has any calls at all. Call data loads a day or two
@@ -572,7 +683,7 @@ const BLENDED_STAGES: RoutingStage[] = (() => {
  */
 async function latestDayWithVolume(token: string, query: LookerQuery): Promise<string | null> {
   const date = dailyDateField(query)
-  const csv = await runQueryCsv(token, query, '30 days', {
+  const run = await runQueryCsv(token, query, '30 days', {
     fields: [date],
     filters: {},
     ignoreSavedFilters: true,
@@ -580,8 +691,8 @@ async function latestDayWithVolume(token: string, query: LookerQuery): Promise<s
     peakNames: false,
     plain: true,
     limit: '1',
-  }).catch(() => '')
-  const cell = csv.trim().split('\n')[1]?.split(',')[0]?.trim()
+  }).catch(() => ({ csv: '', fields: [] }))
+  const cell = run.csv.trim().split('\n')[1]?.split(',')[0]?.trim()
   return cell && /^\d{4}-\d{2}-\d{2}$/.test(cell) ? cell : null
 }
 
@@ -763,27 +874,27 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     }
   }
   const token = await login()
-  const query = await lookQuery(token)
+  const query = await sourceQuery(token)
   await discoverExplore(token, query)
 
   const cachedAudience = audienceFieldCache
   const audience = await audienceFieldFor(token, query)
   let stages = routingStages(query, audience)
   const attempt = async (stage: RoutingStage) => {
-    const csv = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(
-      (err: unknown) => (err instanceof Error ? `!${err.message}` : '!failed'),
+    const run = await runRoutingRange(token, query, range.start, range.end, stage.extra).catch(
+      (err: unknown) => (err instanceof Error ? err.message : 'failed'),
     )
-    const failed = csv.startsWith('!')
-    const parsed = failed ? [] : parseLookerPlaybook(csv)
+    const failed = typeof run === 'string'
+    const parsed = failed ? [] : parseLookerPlaybook(run.csv, run.fields)
     const routed = failed ? [] : factsToRouting(parsed, resolved.allowlist)
     const blended = routed.length > 0 && routed.every((fact) => fact.totalCc90 != null)
     return {
       stage,
       facts: stage.requiresSplit && blended ? [] : routed,
       note: failed
-        ? `${stage.label}: ${csv.slice(1)}`
-        : `${stage.label}: ${csv.trim() ? csv.trim().split('\n').length : 0} lines, ${parsed.length} rep rows`,
-      header: failed ? '' : firstLine(csv),
+        ? `${stage.label}: ${run}`
+        : `${stage.label}: ${run.csv.trim() ? run.csv.trim().split('\n').length : 0} lines, ${parsed.length} rep rows`,
+      header: failed ? '' : firstLine(run.csv),
     }
   }
 
@@ -837,9 +948,9 @@ export async function fetchLookerRouting(from: string, to: string): Promise<Rout
     emptyReason: `${headline} ${attempts.map((a) => a.note).join(' · ')} · windowed on ${resolveTimeField(
       query,
       dailyFields(query),
-    )} · rep name ${resolveRepNameField(query)} · look ${lookId()} selects [${(query.fields ?? []).join(
-      ', ',
-    )}] from ${query.model}/${query.view} · bare projection [${bareFields(query).join(', ')}] · explore exposed ${
+    )} · rep name ${resolveRepNameField(query)} · source ${query.model}/${query.view} selects [${(
+      query.fields ?? []
+    ).join(', ')}] · bare projection [${bareFields(query).join(', ')}] · explore exposed ${
       discoveredDimensions(query).length
     } dimensions${header ? ` · Looker's columns were: ${header}` : ''}`,
     ...allowlistMeta,
@@ -858,20 +969,18 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
   }
 
   const token = await login()
-  const query = await lookQuery(token)
+  const query = await sourceQuery(token)
   await discoverExplore(token, query)
 
   const trio = async (extra: QueryExtra) => {
-    const [closed, wtdCsv, dodCsv] = await Promise.all([
-      runClosedWeeks(token, query, extra).catch(() => ({ csv: '', savedLook: false })),
-      runWtd(token, query, extra).catch(() => ''),
-      runDod(token, query, extra).catch(() => ''),
+    const empty: QueryRun = { csv: '', fields: [] }
+    const [closed, wtd, dod] = await Promise.all([
+      runClosedWeeks(token, query, extra).catch(() => ({ ...empty, savedLook: false })),
+      runWtd(token, query, extra).catch(() => empty),
+      runDod(token, query, extra).catch(() => empty),
     ])
-    return {
-      facts: restrictToHighSchool(parseLookerPlaybook(closed.csv)),
-      wtdFacts: restrictToHighSchool(wtdCsv ? parseLookerPlaybook(wtdCsv) : []),
-      dailyFacts: restrictToHighSchool(dodCsv ? parseLookerPlaybook(dodCsv) : []),
-    }
+    const parse = (run: QueryRun) => restrictToHighSchool(parseLookerPlaybook(run.csv, run.fields))
+    return { facts: parse(closed), wtdFacts: parse(wtd), dailyFacts: parse(dod) }
   }
   const barren = (r: Awaited<ReturnType<typeof trio>>) => r.facts.length === 0 && r.dailyFacts.length === 0
 
@@ -890,7 +999,7 @@ export async function fetchLookerPayload(slice: Slice, staffing: Staffing): Prom
     slice,
     facts,
     wtdFacts,
-    `Looker look ${lookId()} · High School Peak by Rep Name`,
+    `Looker ${query.model}/${query.view} · High School Peak by Rep Name`,
     dailyFacts,
   )
 }

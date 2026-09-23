@@ -316,6 +316,42 @@ function layoutFromLabels(labels: string[], fieldLabels: string[], pivoted: bool
   return layout
 }
 
+/**
+ * Column layout taken from the query's own field list instead of the CSV's labels.
+ *
+ * Looker prefixes every column label with the view's label, so the explore behind the
+ * sales dashboard -- "Sales Manager Funnel" -- makes every single column read as a manager
+ * column, and the date column wins the manager match. Labels are only a guess; when we
+ * chose the projection ourselves we already know what each column holds, so use that.
+ * Only valid for an un-pivoted result, where columns follow the requested field order.
+ */
+export function layoutFromFields(fields: string[]): Cols | null {
+  const tails = fields.map((f) => (f.split('.').pop() ?? f).toLowerCase())
+  const at = (test: RegExp) => tails.findIndex((t) => test.test(t))
+  const week = at(/_date$/) >= 0 ? at(/_date$/) : at(/_week$/)
+  // `mgr_name` is the rep on both explores; the manager is `supervisor`.
+  const name = at(/^(mgr_name|rep_name|consultant|sales_rep)$/)
+  if (week < 0 || name < 0) return null
+  return {
+    week,
+    superGroup: at(/work_group|super_group/),
+    name,
+    manager: at(/^(supervisor|rep_manager|manager)$/),
+    hsCc90: -1,
+    hsImpact: -1,
+    hsPgc: -1,
+    hsMix: -1,
+    k12Cc90: -1,
+    k12Impact: -1,
+    k12Pgc: -1,
+    k12Mix: -1,
+    totalPgc: at(/^pgc/),
+    totalCc90: at(/cc90_count$/),
+    totalImpact: at(/closed_client.*count|cc90_with_sale_count/),
+    audience: at(/audience/),
+  }
+}
+
 const HS_AUDIENCE = /hs-?\s?stem/i
 const K12_AUDIENCE = /k12|k-12/i
 
@@ -447,16 +483,17 @@ function nameCol(rows: string[][], fallback: number): number {
   return fallback
 }
 
-export function parseLookerPlaybook(input: string | string[][]): LookerFact[] {
+export function parseLookerPlaybook(input: string | string[][], fields?: string[]): LookerFact[] {
   const rows = typeof input === 'string' ? parseCsv(input) : input
   const headers = headerRowCount(rows)
+  const byFields = fields?.length ? layoutFromFields(fields) : null
   const labels = headers > 0 ? headerLabels(rows, headers) : []
   const byLabel =
     headers > 0
       ? layoutFromLabels(labels, fieldRowLabels(rows, headers), pivotedMask(rows, headers, labels.length))
       : null
-  const start = byLabel ? headers : isPlaybookHeader(rows) ? 2 : 0
-  let layout = byLabel
+  const start = byFields || byLabel ? headers : isPlaybookHeader(rows) ? 2 : 0
+  let layout = byFields ?? byLabel
   if (!layout) {
     layout = { ...layoutFromHeader(rows) }
     layout.name = nameCol(rows, layout.name)
