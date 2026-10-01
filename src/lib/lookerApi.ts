@@ -1,4 +1,4 @@
-import { COLLEGE_BASELINE, WORK_DIRECTIONS, eligibleRoster, type WorkDirection, type CollegePayload, type CollegeFact } from './college'
+import { WORK_DIRECTIONS, eligibleRoster, selectionFromParams, validateSelection, shiftDate, EMPTY_COUNTS, type CollegeSelection, type CollegeCounts, type CollegeDaily, type CollegePeriod, type CollegePayload } from './college'
 import { addDays, daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName, lookerRepNameFilter, overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
@@ -1038,26 +1038,36 @@ async function identityUser(req: Request): Promise<{ email: string } | null> {
   return user.email ? { email: user.email } : null
 }
 
-/** Cross-workgroup report: current directory membership, joined by stable manager ID. */
-export async function fetchCollegePerformance(direction: WorkDirection = 'college-to-hs'): Promise<CollegePayload> {
+/** Period-level DISTINCT counts: never derive ESCVR by summing daily distinct leads. */
+export async function fetchCollegePerformance(selection: CollegeSelection): Promise<CollegePayload> {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const validation = validateSelection(selection, today)
+  if (validation) throw new Error(validation)
   if (!lookerConfigured()) throw new Error('Looker is not configured.')
   const token = await login()
-  const query = exploreQuery()
-  await discoverExplore(token, query)
-  const config = WORK_DIRECTIONS[direction]
-  const audience = `${SOURCE_EXPLORE}.audience_subject`
+  const config = WORK_DIRECTIONS[selection.direction]
+  const audienceField = `${SOURCE_EXPLORE}.audience_subject`
   const managerId = `${SOURCE_EXPLORE}.manager_id`
   const cc = `${SOURCE_EXPLORE}.cc90_count`
   const closed = `${SOURCE_EXPLORE}.closed_client_count_this_call`
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const first = `${SOURCE_EXPLORE}.contact_count_first_transferred_or_inbound`
+  // Reconstruct the documented legacy numerator while its prebuilt measure is a NULL stub.
+  // This is query-local only: no Looker model or dashboard is modified.
+  const field = (name: string) => '${' + SOURCE_EXPLORE + '.' + name + '}'
+  const converted = `(${field('client_closed_ever')} = 1 AND ${field('expert_drop_flag')} = 0 AND ${field('transferred_call_num')} = 1) OR (${field('call_participant_type')} = "Single Consultant" AND ${field('client_closed_ever')} = 1 AND ${field('attempt_ordinal')} = 1 AND ${field('call_type_id')} = 1)`
+  const escvrClosed = 'escvr_closed_clients'
+  const dynamicFields = JSON.stringify([
+    { category: 'dimension', dimension: 'escvr_converted_contact', label: 'ESCVR Converted Contact', expression: `if(${converted}, ${field('contact_id')}, null)`, _kind_hint: 'dimension', _type_hint: 'string' },
+    { category: 'measure', measure: escvrClosed, label: 'ESCVR Closed Clients', based_on: 'escvr_converted_contact', type: 'count_distinct', _kind_hint: 'measure', _type_hint: 'number' },
+  ])
   const run = async (view: string, fields: string[], filters: Record<string, string>) => {
     const res = await lookerFetch(token, '/queries/run/json', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: SOURCE_MODEL, view, fields, filters, limit: '50000', query_timezone: 'America/Chicago' }),
+      body: JSON.stringify({ model: SOURCE_MODEL, view, fields, filters, ...(view === SOURCE_EXPLORE ? { dynamic_fields: dynamicFields } : {}), limit: '50000', query_timezone: 'America/Chicago' }),
     })
     if (!res.ok) throw new Error(`Cross-workgroup query failed (${res.status}); no alternate source was used.`)
     const rows: Record<string, unknown>[] = await res.json()
-    if (!Array.isArray(rows) || rows.length >= 50000) throw new Error('Cross-workgroup query incomplete or truncated.')
+    if (!Array.isArray(rows) || rows.length >= 50000) throw new Error('Cross-workgroup query incomplete or truncated. Choose a shorter range.')
     return rows
   }
   const directory = 'gld_employee_directory'
@@ -1067,27 +1077,58 @@ export async function fetchCollegePerformance(direction: WorkDirection = 'colleg
   const eligibility = eligibleRoster(rosterRows)
   const { roster } = eligibility
   if (!roster.length) throw new Error('No verified non-terminated reps were returned by the employee directory.')
-  const byId = new Map(roster.map(r => [r.id, r.name]))
-  const rows = await run(SOURCE_EXPLORE, [DATE_FIELD, managerId, audience, cc, closed], {
-    ...dashboardFilters(query), [managerId]: roster.map(r => r.id).join(','),
-    [audience]: config.audiences.join(','), [LOOKER_TIME_FILTER]: `${COLLEGE_BASELINE} to ${addDays(today, 1)}`,
-  })
+  const repIds = new Set(roster.map(r => r.id))
+  const audiences: readonly string[] = selection.audience === 'All' ? config.audiences : [selection.audience]
+  // CC90 is already filtered inside its measure. Do not impose that filter on first connects:
+  // qualifying first transfers / inbound attempts may be shorter than 90 seconds.
+  const baseFilters = {
+    [`${SOURCE_EXPLORE}.business`]: 'International,VT Core',
+    [`${SOURCE_EXPLORE}.expert_type`]: '-Dropped Expert',
+    [managerId]: roster.map(r => r.id).join(','), [audienceField]: audiences.join(','),
+  }
   const number = (value: unknown): number | null => value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)
-  const keys = new Set<string>()
-  const facts: CollegeFact[] = rows.map(row => {
-    const a = String(row[audience]), date = String(row[DATE_FIELD] ?? '').slice(0, 10), repId = String(row[managerId] ?? '')
-    const name = byId.get(repId)
-    if (!(config.audiences as readonly string[]).includes(a) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date < COLLEGE_BASELINE || date > today || !name) throw new Error('Unexpected audience, date, or roster membership in cross-workgroup query.')
-    const key = `${date}|${repId}|${a}`
-    if (keys.has(key)) throw new Error('Duplicate daily rep/audience rows returned.')
-    keys.add(key)
-    return { date, repId, name, audience: a, cc90: number(row[cc]), closes: number(row[closed]) }
-  })
+  const counts = (row: Record<string, unknown>): CollegeCounts => ({ cc90: number(row[cc]), closes: number(row[closed]), firstConnects: number(row[first]), escvrCloses: number(row[escvrClosed]) })
+  const ensureUnique = (rows: Record<string, unknown>[], fields: string[]) => {
+    const keys = rows.map(r => JSON.stringify(fields.map(f => r[f])))
+    if (new Set(keys).size !== rows.length) throw new Error('Duplicate report rows returned by Looker.')
+    return rows
+  }
+  const period = async (range: CollegeSelection['before']): Promise<CollegePeriod> => {
+    const filters = { ...baseFilters, [LOOKER_TIME_FILTER]: `${range.start} to ${shiftDate(range.end, 1)}` }
+    const query = (dimensions: string[]) => run(SOURCE_EXPLORE, [...dimensions, cc, closed, first, escvrClosed], filters)
+    // Query each requested grouping directly; distinct contacts and clients are non-additive.
+    const [overallRows, repRows, audienceRows] = await Promise.all([query([]), query([managerId]), query([audienceField])])
+    const [dailyRows, repDailyRows] = await Promise.all([query([DATE_FIELD]), query([DATE_FIELD, managerId])])
+    if (overallRows.length > 1) throw new Error('Unexpected overall query grain.')
+    const repId = (row: Record<string, unknown>) => {
+      const id = String(row[managerId] ?? '')
+      if (!repIds.has(id)) throw new Error('Query returned a rep outside the verified roster.')
+      return id
+    }
+    const daily = (rows: Record<string, unknown>[], perRep: boolean): CollegeDaily[] => ensureUnique(rows, perRep ? [DATE_FIELD, managerId] : [DATE_FIELD]).map(row => {
+      const date = String(row[DATE_FIELD] ?? '').slice(0, 10)
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date < range.start || date > range.end) throw new Error('Query returned activity outside the selected date range.')
+      return { ...counts(row), date, ...(perRep ? { repId: repId(row) } : {}) }
+    })
+    return {
+      range, overall: overallRows.length ? counts(overallRows[0]) : { ...EMPTY_COUNTS },
+      reps: ensureUnique(repRows, [managerId]).map(row => ({ repId: repId(row), counts: counts(row) })),
+      audiences: ensureUnique(audienceRows, [audienceField]).map(row => {
+        const audience = String(row[audienceField])
+        if (!audiences.includes(audience)) throw new Error('Query returned an unexpected audience.')
+        return { audience, counts: counts(row) }
+      }),
+      daily: daily(dailyRows, false), repDaily: daily(repDailyRows, true),
+    }
+  }
+  // Keep concurrency bounded to three queries while fetching both independent ranges.
+  const before = await period(selection.before)
+  const after = await period(selection.after)
   return {
-    ...eligibility, direction, facts, today, refreshedAt: new Date().toISOString(), source: `${SOURCE_MODEL}/${SOURCE_EXPLORE}`,
+    ...eligibility, selection, before, after, today, refreshedAt: new Date().toISOString(), source: `${SOURCE_MODEL}/${SOURCE_EXPLORE}`,
     rosterAsOf: [...new Set(rosterRows.map(r => String(r[`${directory}.updated_at_date`] ?? 'Unknown')))].sort(),
-    membership: `Current ${config.group} employee-directory roster (latest row per employee), joined to activity by manager ID in both periods. Only is_termed = No is included. The source flag includes previously terminated/re-hired employees. This is not a frozen October 1 roster.`,
-    escvrNotice: 'ESCVR is unavailable: the official Looker new_expert_scvr numerator (closed_client_first_transfer_or_inbound_count) is a NULL placeholder, verified October 1, 2026. Its denominator is first-transfer/first-inbound contacts, not CC90. No replacement rate is used.',
+    membership: `Latest ${config.group} employee-directory roster, joined by manager ID in both periods. Only is_termed = No is included; that flag also excludes previously terminated/re-hired employees. This is not a historical roster snapshot.`,
+    escvrNotice: 'ESCVR = closed clients from the selected first-transfer/first-inbound cohort ÷ distinct first-transfer/first-inbound contacts. The closed-client numerator is reconstructed from the documented Looker closed_client_first_transfer_or_inbound_count rules because that prebuilt field is still a NULL placeholder. Qualifying converted first transfers require expert_drop_flag = 0; Single Consultant first inbound attempts follow the documented rule. First connects include qualifying short calls. Later conversions update the original first-connect cohort, so recent periods are still maturing. Counts are queried directly at each period/grouping; dashboard reconciliation remains pending.',
   }
 }
 
@@ -1111,7 +1152,13 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
   }
 
   try {
-    if (url.searchParams.get('view') === 'college') return Response.json(await fetchCollegePerformance(url.searchParams.get('direction') === 'hs-to-college' ? 'hs-to-college' : 'college-to-hs'), { headers: { 'Cache-Control': 'no-store' } })
+    if (url.searchParams.get('view') === 'college') {
+      const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+      let selection: CollegeSelection
+      try { selection = selectionFromParams(url.searchParams, today) }
+      catch (error) { return Response.json({ error: error instanceof Error ? error.message : 'Invalid date selection.' }, { status: 400, headers: { 'Cache-Control': 'no-store' } }) }
+      return Response.json(await fetchCollegePerformance(selection), { headers: { 'Cache-Control': 'no-store' } })
+    }
     if (url.searchParams.get('view') === 'overflow-chips') {
       if (req.method === 'POST') {
         const raw = await req.json().catch(() => null)

@@ -64,3 +64,16 @@ The login wall and the Looker function both require a Varsity Tutors Google acco
 After that, opening the Netlify URL shows **Continue with Google**. Live Looker data is only returned if the request has a valid Identity JWT from that Google session. A client-only wall is not enough on its own; the function is the data perimeter.
 
 Build: `npm run build`.
+
+### Cross-workgroup comparison
+
+The College → HS/K12 tab also supports HS → COL/GTP. Each comparison uses the latest employee-directory roster (`rownum = 1`), requires `is_termed = No`, and joins call data by manager ID. Before and After have independent inclusive Central dates, with a maximum of 366 days per range. The 7-day and 28-day presets use completed days; a range ending today is marked partial. Date/audience edits take effect with **Apply ranges**.
+
+- **pGC:** `closed_client_count_this_call / cc90_count`.
+- **ESCVR:** closed clients in the selected first-transfer / first-inbound cohort divided by `contact_count_first_transferred_or_inbound`. The numerator's prebuilt Looker field is currently a NULL placeholder. A query-local distinct-count measure reconstructs its documented rule: converted first transfer with no expert drop, or converted Single Consultant first inbound attempt. Later conversions update the first-connect cohort. This reconstruction is labeled in the report; full dashboard reconciliation remains pending.
+- Qualifying short calls remain in the first-connect denominator. The CC90 measure applies its own eligibility filter. Both metrics use VT Core / International and exclude dropped experts.
+- Overall, audience, rep, and daily groupings are queried separately. Period distinct counts are never made by summing daily distinct counts. Rep totals can exceed overall distinct totals when credit overlaps.
+- Switch the table between pGC and ESCVR, then click any column header to sort. Unknown values stay last in either direction.
+- Bottom quartile uses the selected metric, ranking period, and minimum denominator (20 by default). It selects the lowest `ceil(eligible reps / 4)`, including boundary ties. At least four reps must qualify. Search and the bottom-only filter do not change the ranking population. The displayed weighted quartile rate uses the sum of rep numerators divided by the sum of rep denominators.
+
+Checks: `node --experimental-strip-types --test scripts/college.test.mjs` and `npm run build`.
