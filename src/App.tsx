@@ -1,3 +1,4 @@
+import { CollegePage } from './components/CollegePage'
 import { useEffect, useMemo, useState } from 'react'
 import { IntradayTable } from './components/IntradayTable'
 import { FilterBar } from './components/FilterBar'
@@ -680,8 +681,8 @@ export default function App() {
         onRestoreHidden={onRestoreHidden}
         onOpenSettings={() => setSettingsOpen(true)}
         onRefresh={() => setReload((n) => n + 1)}
-        refreshing={tab === 'routing' ? routingLoading : tab === 'intraday' ? intradayLoading : playbookLoading}
-        updatedAt={updatedAt}
+        refreshing={tab === 'college' ? false : tab === 'routing' ? routingLoading : tab === 'intraday' ? intradayLoading : playbookLoading}
+        updatedAt={tab === 'college' ? null : updatedAt}
         routingPeriod={routingPeriod}
         routingStart={routingStart}
         routingEnd={routingEnd}
@@ -690,10 +691,10 @@ export default function App() {
       />
 
       <main className="mt-4 space-y-4">
-        {tab !== 'routing' && tab !== 'intraday' && livePayload?.emptyReason && livePayload.roster.length > 0 ? (
+        {tab !== 'college' && tab !== 'routing' && tab !== 'intraday' && livePayload?.emptyReason && livePayload.roster.length > 0 ? (
           <p className="mx-auto max-w-6xl px-4 text-sm text-amber-700 sm:px-6">{livePayload.emptyReason}</p>
         ) : null}
-        {tab === 'routing' ? (
+        {tab === 'college' ? <CollegePage reload={reload} /> : tab === 'routing' ? (
           <>
             {routingLoading ? (
               <p className="mx-auto max-w-6xl px-4 text-xs text-slate-400 sm:px-6">Loading range…</p>

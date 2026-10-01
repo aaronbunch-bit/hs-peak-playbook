@@ -122,7 +122,7 @@ export function FilterBar({
                 HS <span className="title-gradient">Peak</span> Playbook
               </h1>
             </div>
-            <nav className="flex items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">
+            <nav className="flex flex-wrap items-end gap-3 border-l border-slate-200/80 pl-4" aria-label="Views">
               <button type="button" className="nav-tab" data-on={tab === 'playbook' || tab === 'wtd'} onClick={() => onTab('playbook')}>
                 Playbook
               </button>
@@ -144,6 +144,7 @@ export function FilterBar({
               >
                 Routing
               </button>
+              <button type="button" className="nav-tab" data-on={tab === 'college'} onClick={() => onTab('college')}>College → HS/K12</button>
               <button type="button" className="nav-tab" data-on={tab === 'focus'} onClick={() => onTab('focus')}>
                 Focus
               </button>

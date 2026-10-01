@@ -1,3 +1,4 @@
+import { COLLEGE_BASELINE, type CollegePayload, type CollegeFact } from './college'
 import { addDays, daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName, lookerRepNameFilter, overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
@@ -1037,6 +1038,50 @@ async function identityUser(req: Request): Promise<{ email: string } | null> {
   return user.email ? { email: user.email } : null
 }
 
+/** Strict College report: no relaxed filters, seed rows, or legacy source substitution. */
+export async function fetchCollegePerformance(): Promise<CollegePayload> {
+  if (!lookerConfigured()) throw new Error('Looker is not configured.')
+  const token = await login()
+  const query = exploreQuery()
+  await discoverExplore(token, query)
+  const dimensions = discoveredDimensions(query)
+  const workGroup = dimensions.find(d => d.name === `${SOURCE_EXPLORE}.work_group`)
+    ?? dimensions.find(d => d.name.split('.').pop() === 'work_group')
+  if (!workGroup) throw new Error('College workgroup field is unavailable; roster cannot be verified.')
+  const audience = `${SOURCE_EXPLORE}.audience_subject`
+  const cc = `${SOURCE_EXPLORE}.cc90_count`
+  const closed = `${SOURCE_EXPLORE}.closed_client_count_this_call`
+  if (!dimensions.some(d => d.name === audience)) throw new Error('HS/K12 audience field is unavailable.')
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const run = async (fields: string[], filters: Record<string, string>) => {
+    const res = await lookerFetch(token, '/queries/run/json', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: SOURCE_MODEL, view: SOURCE_EXPLORE, fields, filters, limit: '50000', query_timezone: 'America/Chicago' }),
+    })
+    if (!res.ok) throw new Error(`College query failed (${res.status}); no alternate source was used.`)
+    const rows: Record<string, unknown>[] = await res.json()
+    if (!Array.isArray(rows) || rows.length >= 50000) throw new Error('College query incomplete or truncated.')
+    return rows
+  }
+  // Membership is independent of HS/K12 activity and CC90 eligibility.
+  const rosterRows = await run([REP_NAME_FIELD], { [workGroup.name]: 'College' })
+  const roster = [...new Set(rosterRows.map(r => String(r[REP_NAME_FIELD] ?? '').trim()).filter(Boolean))].sort()
+  if (!roster.length) throw new Error('Looker returned no College roster. Workgroup membership needs verification.')
+  const rows = await run([DATE_FIELD, REP_NAME_FIELD, audience, cc, closed], {
+    ...dashboardFilters(query), [workGroup.name]: 'College',
+    [audience]: 'HS-STEM,K12 Test Prep', [LOOKER_TIME_FILTER]: `${COLLEGE_BASELINE} to ${addDays(today, 1)}`,
+  })
+  const number = (value: unknown): number | null => value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)
+  const facts: CollegeFact[] = rows.map(row => {
+    const a = String(row[audience])
+    const date = String(row[DATE_FIELD] ?? '').slice(0, 10)
+    const name = String(row[REP_NAME_FIELD] ?? '').trim()
+    if ((a !== 'HS-STEM' && a !== 'K12 Test Prep') || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !roster.includes(name)) throw new Error('College query returned unexpected audience, date, or roster membership.')
+    return { date, name, audience: a, cc90: number(row[cc]), closes: number(row[closed]) }
+  })
+  return { roster, facts, today, refreshedAt: new Date().toISOString(), source: `${SOURCE_MODEL}/${SOURCE_EXPLORE}`, membership: `Looker ${workGroup.name} = College; source membership, not a frozen October 1 HR roster. People absent from this source cannot be verified.` }
+}
+
 export async function handleLookerRequest(req: Request): Promise<Response> {
   const url = new URL(req.url)
   const slice = (url.searchParams.get('slice') === 'overall' ? 'supergroup' : url.searchParams.get('slice')) as Slice
@@ -1057,6 +1102,7 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
   }
 
   try {
+    if (url.searchParams.get('view') === 'college') return Response.json(await fetchCollegePerformance(), { headers: { 'Cache-Control': 'no-store' } })
     if (url.searchParams.get('view') === 'overflow-chips') {
       if (req.method === 'POST') {
         const raw = await req.json().catch(() => null)
@@ -1095,6 +1141,7 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
     return Response.json(payload, { status: payload.empty ? 200 : 200 })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Looker request failed'
+    if (url.searchParams.get('view') === 'college') return Response.json({ error: message }, { status: 500 })
     if (url.searchParams.get('view') === 'overflow-chips') {
       return Response.json({ error: message }, { status: 500 })
     }
