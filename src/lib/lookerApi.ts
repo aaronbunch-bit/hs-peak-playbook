@@ -1,4 +1,4 @@
-import { COLLEGE_BASELINE, type CollegePayload, type CollegeFact } from './college'
+import { COLLEGE_BASELINE, WORK_DIRECTIONS, eligibleRoster, type WorkDirection, type CollegePayload, type CollegeFact } from './college'
 import { addDays, daysSundayThroughToday, lastCompleteWeekStart, sundayWeekStart, toIsoDate, yesterday } from './calendar'
 import { HIGH_SCHOOL_WORK_GROUP, canonicalHighSchoolName, lookerRepNameFilter, overlayHighSchoolRoster } from '../data/highSchoolWorkGroup'
 import { seed } from '../data/seed'
@@ -1038,48 +1038,57 @@ async function identityUser(req: Request): Promise<{ email: string } | null> {
   return user.email ? { email: user.email } : null
 }
 
-/** Strict College report: no relaxed filters, seed rows, or legacy source substitution. */
-export async function fetchCollegePerformance(): Promise<CollegePayload> {
+/** Cross-workgroup report: current directory membership, joined by stable manager ID. */
+export async function fetchCollegePerformance(direction: WorkDirection = 'college-to-hs'): Promise<CollegePayload> {
   if (!lookerConfigured()) throw new Error('Looker is not configured.')
   const token = await login()
   const query = exploreQuery()
   await discoverExplore(token, query)
-  const dimensions = discoveredDimensions(query)
-  const workGroup = dimensions.find(d => d.name === `${SOURCE_EXPLORE}.work_group`)
-    ?? dimensions.find(d => d.name.split('.').pop() === 'work_group')
-  if (!workGroup) throw new Error('College workgroup field is unavailable; roster cannot be verified.')
+  const config = WORK_DIRECTIONS[direction]
   const audience = `${SOURCE_EXPLORE}.audience_subject`
+  const managerId = `${SOURCE_EXPLORE}.manager_id`
   const cc = `${SOURCE_EXPLORE}.cc90_count`
   const closed = `${SOURCE_EXPLORE}.closed_client_count_this_call`
-  if (!dimensions.some(d => d.name === audience)) throw new Error('HS/K12 audience field is unavailable.')
   const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Chicago', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-  const run = async (fields: string[], filters: Record<string, string>) => {
+  const run = async (view: string, fields: string[], filters: Record<string, string>) => {
     const res = await lookerFetch(token, '/queries/run/json', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: SOURCE_MODEL, view: SOURCE_EXPLORE, fields, filters, limit: '50000', query_timezone: 'America/Chicago' }),
+      body: JSON.stringify({ model: SOURCE_MODEL, view, fields, filters, limit: '50000', query_timezone: 'America/Chicago' }),
     })
-    if (!res.ok) throw new Error(`College query failed (${res.status}); no alternate source was used.`)
+    if (!res.ok) throw new Error(`Cross-workgroup query failed (${res.status}); no alternate source was used.`)
     const rows: Record<string, unknown>[] = await res.json()
-    if (!Array.isArray(rows) || rows.length >= 50000) throw new Error('College query incomplete or truncated.')
+    if (!Array.isArray(rows) || rows.length >= 50000) throw new Error('Cross-workgroup query incomplete or truncated.')
     return rows
   }
-  // Membership is independent of HS/K12 activity and CC90 eligibility.
-  const rosterRows = await run([REP_NAME_FIELD], { [workGroup.name]: 'College' })
-  const roster = [...new Set(rosterRows.map(r => String(r[REP_NAME_FIELD] ?? '').trim()).filter(Boolean))].sort()
-  if (!roster.length) throw new Error('Looker returned no College roster. Workgroup membership needs verification.')
-  const rows = await run([DATE_FIELD, REP_NAME_FIELD, audience, cc, closed], {
-    ...dashboardFilters(query), [workGroup.name]: 'College',
-    [audience]: 'HS-STEM,K12 Test Prep', [LOOKER_TIME_FILTER]: `${COLLEGE_BASELINE} to ${addDays(today, 1)}`,
+  const directory = 'gld_employee_directory'
+  const rosterRows = await run(directory, ['mgr_id', 'mgr_name', 'is_termed', 'updated_at_date'].map(f => `${directory}.${f}`), {
+    [`${directory}.work_group`]: config.group, [`${directory}.rownum`]: '1',
+  })
+  const eligibility = eligibleRoster(rosterRows)
+  const { roster } = eligibility
+  if (!roster.length) throw new Error('No verified non-terminated reps were returned by the employee directory.')
+  const byId = new Map(roster.map(r => [r.id, r.name]))
+  const rows = await run(SOURCE_EXPLORE, [DATE_FIELD, managerId, audience, cc, closed], {
+    ...dashboardFilters(query), [managerId]: roster.map(r => r.id).join(','),
+    [audience]: config.audiences.join(','), [LOOKER_TIME_FILTER]: `${COLLEGE_BASELINE} to ${addDays(today, 1)}`,
   })
   const number = (value: unknown): number | null => value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value)
+  const keys = new Set<string>()
   const facts: CollegeFact[] = rows.map(row => {
-    const a = String(row[audience])
-    const date = String(row[DATE_FIELD] ?? '').slice(0, 10)
-    const name = String(row[REP_NAME_FIELD] ?? '').trim()
-    if ((a !== 'HS-STEM' && a !== 'K12 Test Prep') || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !roster.includes(name)) throw new Error('College query returned unexpected audience, date, or roster membership.')
-    return { date, name, audience: a, cc90: number(row[cc]), closes: number(row[closed]) }
+    const a = String(row[audience]), date = String(row[DATE_FIELD] ?? '').slice(0, 10), repId = String(row[managerId] ?? '')
+    const name = byId.get(repId)
+    if (!(config.audiences as readonly string[]).includes(a) || !/^\d{4}-\d{2}-\d{2}$/.test(date) || date < COLLEGE_BASELINE || date > today || !name) throw new Error('Unexpected audience, date, or roster membership in cross-workgroup query.')
+    const key = `${date}|${repId}|${a}`
+    if (keys.has(key)) throw new Error('Duplicate daily rep/audience rows returned.')
+    keys.add(key)
+    return { date, repId, name, audience: a, cc90: number(row[cc]), closes: number(row[closed]) }
   })
-  return { roster, facts, today, refreshedAt: new Date().toISOString(), source: `${SOURCE_MODEL}/${SOURCE_EXPLORE}`, membership: `Looker ${workGroup.name} = College; source membership, not a frozen October 1 HR roster. People absent from this source cannot be verified.` }
+  return {
+    ...eligibility, direction, facts, today, refreshedAt: new Date().toISOString(), source: `${SOURCE_MODEL}/${SOURCE_EXPLORE}`,
+    rosterAsOf: [...new Set(rosterRows.map(r => String(r[`${directory}.updated_at_date`] ?? 'Unknown')))].sort(),
+    membership: `Current ${config.group} employee-directory roster (latest row per employee), joined to activity by manager ID in both periods. Only is_termed = No is included. The source flag includes previously terminated/re-hired employees. This is not a frozen October 1 roster.`,
+    escvrNotice: 'ESCVR is unavailable: the official Looker new_expert_scvr numerator (closed_client_first_transfer_or_inbound_count) is a NULL placeholder, verified October 1, 2026. Its denominator is first-transfer/first-inbound contacts, not CC90. No replacement rate is used.',
+  }
 }
 
 export async function handleLookerRequest(req: Request): Promise<Response> {
@@ -1102,7 +1111,7 @@ export async function handleLookerRequest(req: Request): Promise<Response> {
   }
 
   try {
-    if (url.searchParams.get('view') === 'college') return Response.json(await fetchCollegePerformance(), { headers: { 'Cache-Control': 'no-store' } })
+    if (url.searchParams.get('view') === 'college') return Response.json(await fetchCollegePerformance(url.searchParams.get('direction') === 'hs-to-college' ? 'hs-to-college' : 'college-to-hs'), { headers: { 'Cache-Control': 'no-store' } })
     if (url.searchParams.get('view') === 'overflow-chips') {
       if (req.method === 'POST') {
         const raw = await req.json().catch(() => null)
