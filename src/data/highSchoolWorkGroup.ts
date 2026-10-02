@@ -3,7 +3,8 @@ import type { RosterEntry } from '../lib/types'
 /** High School work group. Names and Peak managers only — no emails or IDs. */
 export const HIGH_SCHOOL_WORK_GROUP = 'High School'
 
-export const HIGH_SCHOOL_ROSTER: Array<{ name: string; manager: string }> = [
+export const HIGH_SCHOOL_ROSTER: Array<{ name: string; manager: string; staffing?: RosterEntry['staffing'] }> = [
+  { name: 'Amanda Finn', manager: 'Angela Damon', staffing: 'primary' },
   { name: 'Amanda Schaefer', manager: 'Liz Weiss' },
   { name: 'Amy Mireles', manager: 'Emily Lopez' },
   { name: 'Angela Mattina', manager: 'Emily Lopez' },
@@ -24,6 +25,7 @@ export const HIGH_SCHOOL_ROSTER: Array<{ name: string; manager: string }> = [
   { name: 'Del Ali', manager: 'Liz Weiss' },
   { name: 'Dunte Williams', manager: 'Liz Weiss' },
   { name: 'Eliza Olson', manager: 'Angela Damon' },
+  { name: 'Ginger Stevenson', manager: 'Emily Lopez', staffing: 'primary' },
   { name: 'Hannah Dahl', manager: 'Liz Weiss' },
   { name: 'Hector Juarez', manager: 'Emily Lopez' },
   { name: 'Jenn Babcock', manager: 'Liz Weiss' },
@@ -99,14 +101,14 @@ export function lookerRepNameFilter(): string {
 /** Keep every High School Peak rep on the roster, even with no Looker volume yet. */
 export function overlayHighSchoolRoster(roster: RosterEntry[]): RosterEntry[] {
   const byName = new Map(roster.map((r) => [r.name.toLowerCase(), r]))
-  return HIGH_SCHOOL_ROSTER.map(({ name, manager }) => {
+  return HIGH_SCHOOL_ROSTER.map(({ name, manager, staffing }) => {
     const prior = byName.get(name.toLowerCase())
     return {
       name,
       level: prior?.level ?? null,
       manager,
       workGroup: HIGH_SCHOOL_WORK_GROUP,
-      staffing: prior?.staffing,
+      staffing: staffing ?? prior?.staffing,
       lookerRepId: prior?.lookerRepId,
     }
   }).sort((a, b) => a.name.localeCompare(b.name))
